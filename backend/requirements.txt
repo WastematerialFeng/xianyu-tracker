@@ -1,0 +1,16 @@
+# 后端依赖
+# FastAPI - 轻量级 Web 框架，自带 API 文档
+# 为什么用：符合 AGENTS.md 规范，比 Flask 更现代，性能更好
+fastapi==0.109.0
+
+# Uvicorn - ASGI 服务器，用于运行 FastAPI
+# 为什么用：FastAPI 官方推荐的服务器
+uvicorn==0.27.0
+
+# Pydantic - 数据验证库
+# 为什么用：FastAPI 内置依赖，用于请求/响应数据验证
+pydantic==2.5.3
+
+# python-dotenv - 读取 .env 文件
+# 为什么用：管理环境变量，符合 AGENTS.md 禁止硬编码 API keys 的规范
+python-dotenv==1.0.0
