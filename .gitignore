@@ -1,0 +1,26 @@
+# 依赖
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 环境变量
+.env
+.env.local
+
+# 构建产物
+.next/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# 数据库
+*.db
+
+# 系统文件
+.DS_Store
+Thumbs.db
