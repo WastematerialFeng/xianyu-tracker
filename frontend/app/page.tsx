@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { getProducts, deleteProduct, Product, getLatestStats, DailyStats, getAccounts, Account, createAccount } from "@/lib/api";
+import React, { useState, useEffect } from "react";
+import { getProducts, deleteProduct, Product, getLatestStats, DailyStats, getAccounts, Account, createAccount, getProductStats, createStats, deleteStats } from "@/lib/api";
 import Link from "next/link";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -15,6 +16,17 @@ export default function Home() {
   const [sortBy, setSortBy] = useState("newest");
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [newAccountName, setNewAccountName] = useState("");
+  
+  // 展开数据录入相关
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [expandedStats, setExpandedStats] = useState<DailyStats[]>([]);
+  const [statsForm, setStatsForm] = useState({
+    record_date: new Date().toISOString().split("T")[0],
+    exposures: "",
+    views: "",
+    favorites: "",
+    inquiries: "",
+  });
 
   const loadAccounts = async () => {
     const data = await getAccounts();
@@ -63,6 +75,56 @@ export default function Home() {
     if (!accountId) return "未分配";
     const account = accounts.find(a => a.id === accountId);
     return account ? account.name : "未知账号";
+  };
+
+  // 展开/收起商品数据录入
+  const handleExpand = async (productId: number) => {
+    if (expandedId === productId) {
+      setExpandedId(null);
+      setExpandedStats([]);
+    } else {
+      setExpandedId(productId);
+      const stats = await getProductStats(productId);
+      setExpandedStats(stats || []);
+      setStatsForm({
+        record_date: new Date().toISOString().split("T")[0],
+        exposures: "",
+        views: "",
+        favorites: "",
+        inquiries: "",
+      });
+    }
+  };
+
+  // 保存数据记录
+  const handleSaveStats = async (productId: number) => {
+    await createStats({
+      product_id: productId,
+      record_date: statsForm.record_date,
+      exposures: statsForm.exposures ? parseInt(statsForm.exposures) : 0,
+      views: statsForm.views ? parseInt(statsForm.views) : 0,
+      favorites: statsForm.favorites ? parseInt(statsForm.favorites) : 0,
+      inquiries: statsForm.inquiries ? parseInt(statsForm.inquiries) : 0,
+    });
+    // 刷新展开区域数据
+    const stats = await getProductStats(productId);
+    setExpandedStats(stats || []);
+    // 刷新主页最新数据
+    const latest = await getLatestStats(productId);
+    setProductStats(prev => ({ ...prev, [productId]: latest }));
+    // 清空表单
+    setStatsForm({ ...statsForm, exposures: "", views: "", favorites: "", inquiries: "" });
+  };
+
+  // 删除数据记录
+  const handleDeleteStats = async (statId: number, productId: number) => {
+    if (confirm("确定删除这条记录吗？")) {
+      await deleteStats(statId);
+      const stats = await getProductStats(productId);
+      setExpandedStats(stats || []);
+      const latest = await getLatestStats(productId);
+      setProductStats(prev => ({ ...prev, [productId]: latest }));
+    }
   };
 
   const filteredProducts = products
@@ -193,60 +255,163 @@ export default function Home() {
                 </tr>
               ) : (
                 filteredProducts.map((product) => (
-                  <tr key={product.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-4">
-                      <div className="w-12 h-12 bg-gray-200 rounded-lg flex items-center justify-center text-gray-400">
-                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className="font-medium text-gray-900">{product.title}</span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className="inline-block px-2 py-1 bg-gray-100 text-gray-700 text-sm rounded">
-                        {product.category || "未分类"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className="font-semibold text-orange-600">
-                        {product.price ? `¥${product.price}` : "-"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className={`inline-block px-2 py-1 text-sm rounded ${
-                        product.status === "在售" 
-                          ? "bg-green-100 text-green-700" 
-                          : "bg-gray-100 text-gray-600"
-                      }`}>
-                        {product.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-gray-500 text-sm">
-                      <span>
-                        {productStats[product.id] 
-                          ? `${productStats[product.id]?.views || 0} / ${productStats[product.id]?.favorites || 0}`
-                          : "- / -"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-3">
-                        <Link
-                          href={`/products/${product.id}`}
-                          className="text-blue-600 hover:text-blue-800 font-medium"
-                        >
-                          编辑
-                        </Link>
-                        <button
-                          onClick={() => handleDelete(product.id)}
-                          className="text-red-500 hover:text-red-700 font-medium"
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                  <React.Fragment key={product.id}>
+                    <tr className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-4">
+                        <div className="w-12 h-12 bg-gray-200 rounded-lg flex items-center justify-center text-gray-400">
+                          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className="font-medium text-gray-900">{product.title}</span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className="inline-block px-2 py-1 bg-gray-100 text-gray-700 text-sm rounded">
+                          {product.category || "未分类"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className="font-semibold text-orange-600">
+                          {product.price ? `¥${product.price}` : "-"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`inline-block px-2 py-1 text-sm rounded ${
+                          product.status === "在售" 
+                            ? "bg-green-100 text-green-700" 
+                            : "bg-gray-100 text-gray-600"
+                        }`}>
+                          {product.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-gray-500 text-sm">
+                        <span>
+                          {productStats[product.id] 
+                            ? `${productStats[product.id]?.views || 0} / ${productStats[product.id]?.favorites || 0}`
+                            : "- / -"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => handleExpand(product.id)}
+                            className={`font-medium ${expandedId === product.id ? "text-green-600 hover:text-green-800" : "text-gray-500 hover:text-gray-700"}`}
+                          >
+                            {expandedId === product.id ? "收起" : "数据"}
+                          </button>
+                          <Link
+                            href={`/products/${product.id}`}
+                            className="text-blue-600 hover:text-blue-800 font-medium"
+                          >
+                            编辑
+                          </Link>
+                          <button
+                            onClick={() => handleDelete(product.id)}
+                            className="text-red-500 hover:text-red-700 font-medium"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {/* 展开区域 */}
+                    {expandedId === product.id && (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-4 bg-gray-50 border-t border-b border-gray-200">
+                          <div className="space-y-4">
+                            {/* 数据录入表单 */}
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <input type="date" value={statsForm.record_date} onChange={(e) => setStatsForm({...statsForm, record_date: e.target.value})} className="border border-gray-300 px-3 py-2 rounded-lg text-gray-900 text-sm" />
+                              <input type="number" placeholder="曝光" value={statsForm.exposures} onChange={(e) => setStatsForm({...statsForm, exposures: e.target.value})} className="w-20 border border-gray-300 px-3 py-2 rounded-lg text-gray-900 text-sm" />
+                              <input type="number" placeholder="浏览" value={statsForm.views} onChange={(e) => setStatsForm({...statsForm, views: e.target.value})} className="w-20 border border-gray-300 px-3 py-2 rounded-lg text-gray-900 text-sm" />
+                              <input type="number" placeholder="想要" value={statsForm.favorites} onChange={(e) => setStatsForm({...statsForm, favorites: e.target.value})} className="w-20 border border-gray-300 px-3 py-2 rounded-lg text-gray-900 text-sm" />
+                              <input type="number" placeholder="咨询" value={statsForm.inquiries} onChange={(e) => setStatsForm({...statsForm, inquiries: e.target.value})} className="w-20 border border-gray-300 px-3 py-2 rounded-lg text-gray-900 text-sm" />
+                              <button onClick={() => handleSaveStats(product.id)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">保存</button>
+                            </div>
+                            
+                            {/* 趋势图表 */}
+                            {expandedStats.length > 1 && (
+                              <div className="grid grid-cols-2 gap-4">
+                                {/* 累计数据趋势 */}
+                                <div className="bg-white p-4 rounded-lg">
+                                  <h4 className="text-sm font-semibold text-gray-700 mb-2">累计数据趋势</h4>
+                                  <ResponsiveContainer width="100%" height={150}>
+                                    <LineChart data={[...expandedStats].sort((a, b) => a.record_date.localeCompare(b.record_date))}>
+                                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                      <XAxis dataKey="record_date" tick={{ fontSize: 10 }} stroke="#6b7280" />
+                                      <YAxis tick={{ fontSize: 10 }} stroke="#6b7280" />
+                                      <Tooltip contentStyle={{ fontSize: 12 }} />
+                                      <Legend wrapperStyle={{ fontSize: 10 }} />
+                                      <Line type="monotone" dataKey="views" name="浏览量(累计)" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                                      <Line type="monotone" dataKey="favorites" name="想要数(累计)" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+                                      <Line type="monotone" dataKey="exposures" name="曝光量" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                                      <Line type="monotone" dataKey="inquiries" name="咨询数" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                                    </LineChart>
+                                  </ResponsiveContainer>
+                                </div>
+                                {/* 每日增长趋势 */}
+                                <div className="bg-white p-4 rounded-lg">
+                                  <h4 className="text-sm font-semibold text-gray-700 mb-2">每日增长趋势</h4>
+                                  <ResponsiveContainer width="100%" height={150}>
+                                    <LineChart data={(() => {
+                                      const sorted = [...expandedStats].sort((a, b) => a.record_date.localeCompare(b.record_date));
+                                      return sorted.map((stat, idx) => {
+                                        const prev = idx > 0 ? sorted[idx - 1] : null;
+                                        return {
+                                          record_date: stat.record_date,
+                                          exposures: stat.exposures || 0,
+                                          inquiries: stat.inquiries,
+                                          views_growth: prev ? stat.views - prev.views : stat.views,
+                                          favorites_growth: prev ? stat.favorites - prev.favorites : stat.favorites,
+                                        };
+                                      });
+                                    })()}>
+                                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                      <XAxis dataKey="record_date" tick={{ fontSize: 10 }} stroke="#6b7280" />
+                                      <YAxis tick={{ fontSize: 10 }} stroke="#6b7280" />
+                                      <Tooltip contentStyle={{ fontSize: 12 }} />
+                                      <Legend wrapperStyle={{ fontSize: 10 }} />
+                                      <Line type="monotone" dataKey="views_growth" name="浏览增长" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                                      <Line type="monotone" dataKey="favorites_growth" name="想要增长" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+                                      <Line type="monotone" dataKey="exposures" name="曝光量" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                                      <Line type="monotone" dataKey="inquiries" name="咨询数" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                                    </LineChart>
+                                  </ResponsiveContainer>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 历史记录 */}
+                            {expandedStats.length > 0 ? (
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="text-gray-500 text-left">
+                                    <th className="py-2">日期</th><th>曝光</th><th>浏览</th><th>想要</th><th>咨询</th><th>操作</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {expandedStats.slice(0, 5).map((stat) => (
+                                    <tr key={stat.id} className="text-gray-700">
+                                      <td className="py-1">{stat.record_date}</td>
+                                      <td>{stat.exposures || 0}</td>
+                                      <td>{stat.views}</td>
+                                      <td>{stat.favorites}</td>
+                                      <td>{stat.inquiries}</td>
+                                      <td><button onClick={() => handleDeleteStats(stat.id, product.id)} className="text-red-500 hover:text-red-700">删除</button></td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            ) : (
+                              <p className="text-gray-500 text-sm">暂无数据记录</p>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))
               )}
             </tbody>
