@@ -45,6 +45,26 @@ class ProductUpdate(BaseModel):
     status: Optional[str] = None
 
 
+class StatsCreate(BaseModel):
+    """创建数据记录的请求体"""
+    product_id: int
+    record_date: str  # 格式: YYYY-MM-DD
+    exposures: Optional[int] = 0
+    views: Optional[int] = 0
+    clicks: Optional[int] = 0
+    inquiries: Optional[int] = 0
+    favorites: Optional[int] = 0
+
+
+class StatsUpdate(BaseModel):
+    """更新数据记录的请求体"""
+    exposures: Optional[int] = None
+    views: Optional[int] = None
+    clicks: Optional[int] = None
+    inquiries: Optional[int] = None
+    favorites: Optional[int] = None
+
+
 # API 路由
 @app.get("/")
 def root():
@@ -134,6 +154,76 @@ def delete_product(product_id: int):
     if cursor.rowcount == 0:
         conn.close()
         raise HTTPException(status_code=404, detail="商品不存在")
+    conn.commit()
+    conn.close()
+    return {"message": "删除成功"}
+
+
+# ========== 数据记录 API ==========
+
+@app.get("/api/products/{product_id}/stats")
+def get_product_stats(product_id: int):
+    """获取商品的所有数据记录"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM daily_stats WHERE product_id = ? ORDER BY record_date DESC",
+        (product_id,)
+    )
+    stats = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return {"data": stats}
+
+
+@app.get("/api/products/{product_id}/stats/latest")
+def get_latest_stats(product_id: int):
+    """获取商品最新的数据记录"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM daily_stats WHERE product_id = ? ORDER BY record_date DESC LIMIT 1",
+        (product_id,)
+    )
+    stat = cursor.fetchone()
+    conn.close()
+    return {"data": dict(stat) if stat else None}
+
+
+@app.post("/api/stats")
+def create_stats(stats: StatsCreate):
+    """创建或更新数据记录（同一天同一商品只保留一条）"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # 检查商品是否存在
+    cursor.execute("SELECT id FROM products WHERE id = ?", (stats.product_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="商品不存在")
+    
+    # 使用 REPLACE 实现 upsert（同一天同一商品更新）
+    cursor.execute(
+        """INSERT OR REPLACE INTO daily_stats 
+           (product_id, record_date, exposures, views, clicks, inquiries, favorites)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (stats.product_id, stats.record_date, stats.exposures, stats.views, 
+         stats.clicks, stats.inquiries, stats.favorites)
+    )
+    conn.commit()
+    stat_id = cursor.lastrowid
+    conn.close()
+    return {"message": "记录成功", "id": stat_id}
+
+
+@app.delete("/api/stats/{stat_id}")
+def delete_stats(stat_id: int):
+    """删除数据记录"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM daily_stats WHERE id = ?", (stat_id,))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="记录不存在")
     conn.commit()
     conn.close()
     return {"message": "删除成功"}

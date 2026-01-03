@@ -43,6 +43,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             product_id INTEGER NOT NULL,
             record_date DATE NOT NULL,
+            exposures INTEGER DEFAULT 0,
             views INTEGER DEFAULT 0,
             clicks INTEGER DEFAULT 0,
             inquiries INTEGER DEFAULT 0,

@@ -64,3 +64,57 @@ export async function deleteProduct(id: number): Promise<void> {
     method: "DELETE",
   });
 }
+
+// ========== 数据记录 API ==========
+
+export interface DailyStats {
+  id: number;
+  product_id: number;
+  record_date: string;
+  exposures: number;
+  views: number;
+  clicks: number;
+  inquiries: number;
+  favorites: number;
+}
+
+export interface StatsCreate {
+  product_id: number;
+  record_date: string;
+  exposures?: number;
+  views?: number;
+  clicks?: number;
+  inquiries?: number;
+  favorites?: number;
+}
+
+// 获取商品所有数据记录
+export async function getProductStats(productId: number): Promise<DailyStats[]> {
+  const res = await fetch(`${API_BASE}/api/products/${productId}/stats`);
+  const data = await res.json();
+  return data.data;
+}
+
+// 获取商品最新数据记录
+export async function getLatestStats(productId: number): Promise<DailyStats | null> {
+  const res = await fetch(`${API_BASE}/api/products/${productId}/stats/latest`);
+  const data = await res.json();
+  return data.data;
+}
+
+// 创建数据记录
+export async function createStats(stats: StatsCreate): Promise<{ id: number }> {
+  const res = await fetch(`${API_BASE}/api/stats`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(stats),
+  });
+  return res.json();
+}
+
+// 删除数据记录
+export async function deleteStats(id: number): Promise<void> {
+  await fetch(`${API_BASE}/api/stats/${id}`, {
+    method: "DELETE",
+  });
+}

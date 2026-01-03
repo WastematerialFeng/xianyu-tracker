@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getProducts, deleteProduct, Product } from "@/lib/api";
+import { getProducts, deleteProduct, Product, getLatestStats, DailyStats } from "@/lib/api";
 import Link from "next/link";
 
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [productStats, setProductStats] = useState<Record<number, DailyStats | null>>({});
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -16,6 +17,12 @@ export default function Home() {
     try {
       const data = await getProducts();
       setProducts(data);
+      // 加载每个商品的最新数据
+      const statsMap: Record<number, DailyStats | null> = {};
+      await Promise.all(data.map(async (p) => {
+        statsMap[p.id] = await getLatestStats(p.id);
+      }));
+      setProductStats(statsMap);
     } catch (error) {
       console.error("加载失败:", error);
     }
@@ -174,7 +181,11 @@ export default function Home() {
                       </span>
                     </td>
                     <td className="px-4 py-4 text-gray-500 text-sm">
-                      <span>- / -</span>
+                      <span>
+                        {productStats[product.id] 
+                          ? `${productStats[product.id]?.views || 0} / ${productStats[product.id]?.favorites || 0}`
+                          : "- / -"}
+                      </span>
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-3">
