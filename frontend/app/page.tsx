@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { getProducts, deleteProduct, Product, getLatestStats, DailyStats, getAccounts, Account, createAccount, getProductStats, createStats, deleteStats } from "@/lib/api";
+import { getProducts, deleteProduct, Product, getLatestStats, DailyStats, getAccounts, Account, createAccount, updateAccount, deleteAccount, getProductStats, createStats, deleteStats } from "@/lib/api";
 import Link from "next/link";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
@@ -16,6 +16,8 @@ export default function Home() {
   const [sortBy, setSortBy] = useState("newest");
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [newAccountName, setNewAccountName] = useState("");
+  const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
+  const [editingAccountName, setEditingAccountName] = useState("");
   
   // 展开数据录入相关
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -68,6 +70,23 @@ export default function Home() {
       setNewAccountName("");
       setShowAccountModal(false);
       loadAccounts();
+    }
+  };
+
+  const handleUpdateAccount = async () => {
+    if (editingAccountId && editingAccountName.trim()) {
+      await updateAccount(editingAccountId, { name: editingAccountName.trim() });
+      setEditingAccountId(null);
+      setEditingAccountName("");
+      loadAccounts();
+    }
+  };
+
+  const handleDeleteAccount = async (id: number) => {
+    if (confirm("确定删除这个账号吗？关联的商品将变为未分配状态。")) {
+      await deleteAccount(id);
+      loadAccounts();
+      loadProducts();
     }
   };
 
@@ -449,11 +468,33 @@ export default function Home() {
             {accounts.length > 0 && (
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <p className="text-sm text-gray-500 mb-2">已有账号：</p>
-                <div className="flex flex-wrap gap-2">
+                <div className="space-y-2">
                   {accounts.map((account) => (
-                    <span key={account.id} className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">
-                      {account.name}
-                    </span>
+                    <div key={account.id} className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-lg">
+                      {editingAccountId === account.id ? (
+                        <>
+                          <input
+                            type="text"
+                            value={editingAccountName}
+                            onChange={(e) => setEditingAccountName(e.target.value)}
+                            className="flex-1 border border-gray-300 px-2 py-1 rounded text-gray-900 text-sm"
+                            autoFocus
+                          />
+                          <div className="flex gap-2 ml-2">
+                            <button onClick={handleUpdateAccount} className="text-green-600 hover:text-green-800 text-sm">保存</button>
+                            <button onClick={() => { setEditingAccountId(null); setEditingAccountName(""); }} className="text-gray-500 hover:text-gray-700 text-sm">取消</button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-gray-700 text-sm">{account.name}</span>
+                          <div className="flex gap-2">
+                            <button onClick={() => { setEditingAccountId(account.id); setEditingAccountName(account.name); }} className="text-blue-600 hover:text-blue-800 text-sm">编辑</button>
+                            <button onClick={() => handleDeleteAccount(account.id)} className="text-red-500 hover:text-red-700 text-sm">删除</button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
