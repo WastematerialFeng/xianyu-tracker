@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createProduct } from "@/lib/api";
+import { createProduct, getAccounts, Account } from "@/lib/api";
 import Link from "next/link";
 
 const CATEGORIES = [
@@ -16,13 +16,19 @@ export default function NewProduct() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [images, setImages] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [form, setForm] = useState({
     title: "",
     category: "",
     price: "",
     description: "",
     image_original: 0,
+    account_id: "",
   });
+
+  useEffect(() => {
+    getAccounts().then(setAccounts);
+  }, []);
 
   // 处理图片文件
   const handleImageFiles = (files: FileList | File[]) => {
@@ -85,6 +91,7 @@ export default function NewProduct() {
       price: form.price ? parseFloat(form.price) : undefined,
       description: form.description || undefined,
       image_original: form.image_original,
+      account_id: form.account_id ? parseInt(form.account_id) : undefined,
     });
     router.push("/");
   };
@@ -197,6 +204,21 @@ export default function NewProduct() {
                 />
               </div>
             </div>
+          </div>
+
+          {/* 所属账号 */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">所属账号</label>
+            <select
+              value={form.account_id}
+              onChange={(e) => setForm({ ...form, account_id: e.target.value })}
+              className="w-full border border-gray-300 p-3 rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+            >
+              <option value="">未分配</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>{account.name}</option>
+              ))}
+            </select>
           </div>
 
           {/* 商品文案 */}

@@ -33,6 +33,7 @@ class ProductCreate(BaseModel):
     price: Optional[float] = None
     description: Optional[str] = None
     image_original: Optional[int] = 0  # 0=非原创, 1=原创
+    account_id: Optional[int] = None  # 所属账号
 
 
 class ProductUpdate(BaseModel):
@@ -43,6 +44,19 @@ class ProductUpdate(BaseModel):
     description: Optional[str] = None
     image_original: Optional[int] = None
     status: Optional[str] = None
+    account_id: Optional[int] = None  # 所属账号
+
+
+class AccountCreate(BaseModel):
+    """创建账号的请求体"""
+    name: str
+    xianyu_id: Optional[str] = None
+
+
+class AccountUpdate(BaseModel):
+    """更新账号的请求体"""
+    name: Optional[str] = None
+    xianyu_id: Optional[str] = None
 
 
 class StatsCreate(BaseModel):
@@ -73,11 +87,14 @@ def root():
 
 
 @app.get("/api/products")
-def get_products():
-    """获取所有商品"""
+def get_products(account_id: Optional[int] = None):
+    """获取所有商品，支持按账号筛选"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM products ORDER BY created_at DESC")
+    if account_id:
+        cursor.execute("SELECT * FROM products WHERE account_id = ? ORDER BY created_at DESC", (account_id,))
+    else:
+        cursor.execute("SELECT * FROM products ORDER BY created_at DESC")
     products = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return {"data": products}
@@ -102,10 +119,10 @@ def create_product(product: ProductCreate):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        """INSERT INTO products (title, category, price, description, image_original)
-           VALUES (?, ?, ?, ?, ?)""",
+        """INSERT INTO products (title, category, price, description, image_original, account_id)
+           VALUES (?, ?, ?, ?, ?, ?)""",
         (product.title, product.category, product.price, 
-         product.description, product.image_original)
+         product.description, product.image_original, product.account_id)
     )
     conn.commit()
     product_id = cursor.lastrowid
@@ -224,6 +241,92 @@ def delete_stats(stat_id: int):
     if cursor.rowcount == 0:
         conn.close()
         raise HTTPException(status_code=404, detail="记录不存在")
+    conn.commit()
+    conn.close()
+    return {"message": "删除成功"}
+
+
+# ========== 账号管理 API ==========
+
+@app.get("/api/accounts")
+def get_accounts():
+    """获取所有账号"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM accounts ORDER BY created_at DESC")
+    accounts = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return {"data": accounts}
+
+
+@app.get("/api/accounts/{account_id}")
+def get_account(account_id: int):
+    """获取单个账号"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM accounts WHERE id = ?", (account_id,))
+    account = cursor.fetchone()
+    conn.close()
+    if not account:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    return {"data": dict(account)}
+
+
+@app.post("/api/accounts")
+def create_account(account: AccountCreate):
+    """创建账号"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO accounts (name, xianyu_id) VALUES (?, ?)",
+        (account.name, account.xianyu_id)
+    )
+    conn.commit()
+    account_id = cursor.lastrowid
+    conn.close()
+    return {"message": "创建成功", "id": account_id}
+
+
+@app.put("/api/accounts/{account_id}")
+def update_account(account_id: int, account: AccountUpdate):
+    """更新账号"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # 检查账号是否存在
+    cursor.execute("SELECT * FROM accounts WHERE id = ?", (account_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="账号不存在")
+    
+    # 构建更新语句
+    updates = []
+    values = []
+    if account.name is not None:
+        updates.append("name = ?")
+        values.append(account.name)
+    if account.xianyu_id is not None:
+        updates.append("xianyu_id = ?")
+        values.append(account.xianyu_id)
+    
+    if updates:
+        values.append(account_id)
+        cursor.execute(f"UPDATE accounts SET {', '.join(updates)} WHERE id = ?", values)
+        conn.commit()
+    
+    conn.close()
+    return {"message": "更新成功"}
+
+
+@app.delete("/api/accounts/{account_id}")
+def delete_account(account_id: int):
+    """删除账号"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="账号不存在")
     conn.commit()
     conn.close()
     return {"message": "删除成功"}

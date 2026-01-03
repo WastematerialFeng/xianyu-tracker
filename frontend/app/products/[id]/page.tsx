@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { getProduct, updateProduct, getProductStats, createStats, deleteStats, DailyStats } from "@/lib/api";
+import { getProduct, updateProduct, getProductStats, createStats, deleteStats, DailyStats, getAccounts, Account } from "@/lib/api";
 import Link from "next/link";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 const CATEGORIES = [
   "数码产品", "手机配件", "电脑硬件", "服饰鞋包", "美妆护肤",
@@ -17,6 +18,7 @@ export default function EditProduct() {
   const productId = Number(params.id);
 
   const [activeTab, setActiveTab] = useState<"info" | "stats">("info");
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [form, setForm] = useState({
     title: "",
     category: "",
@@ -24,6 +26,7 @@ export default function EditProduct() {
     description: "",
     image_original: 0,
     status: "在售",
+    account_id: "",
   });
   const [loading, setLoading] = useState(true);
   
@@ -40,7 +43,11 @@ export default function EditProduct() {
 
   useEffect(() => {
     const load = async () => {
-      const product = await getProduct(productId);
+      const [product, accountsData] = await Promise.all([
+        getProduct(productId),
+        getAccounts()
+      ]);
+      setAccounts(accountsData);
       setForm({
         title: product.title,
         category: product.category || "",
@@ -48,6 +55,7 @@ export default function EditProduct() {
         description: product.description || "",
         image_original: product.image_original,
         status: product.status,
+        account_id: product.account_id?.toString() || "",
       });
       const statsData = await getProductStats(productId);
       setStats(statsData || []);
@@ -65,6 +73,7 @@ export default function EditProduct() {
       description: form.description || undefined,
       image_original: form.image_original,
       status: form.status,
+      account_id: form.account_id ? parseInt(form.account_id) : undefined,
     });
     router.push("/");
   };
@@ -91,6 +100,21 @@ export default function EditProduct() {
       const statsData = await getProductStats(productId);
       setStats(statsData || []);
     }
+  };
+
+  // 计算每日增长数据
+  const getDailyGrowth = () => {
+    const sorted = [...stats].sort((a, b) => a.record_date.localeCompare(b.record_date));
+    return sorted.map((stat, index) => {
+      const prev = index > 0 ? sorted[index - 1] : null;
+      return {
+        record_date: stat.record_date,
+        exposures: stat.exposures || 0,           // 每日更新，直接显示
+        inquiries: stat.inquiries,                // 每日更新，直接显示
+        views_growth: prev ? stat.views - prev.views : stat.views,           // 累计值，计算增长
+        favorites_growth: prev ? stat.favorites - prev.favorites : stat.favorites,  // 累计值，计算增长
+      };
+    });
   };
 
   if (loading) return <div className="min-h-screen bg-gray-100 p-8 flex items-center justify-center"><p className="text-gray-500">加载中...</p></div>;
@@ -170,6 +194,19 @@ export default function EditProduct() {
                 <option value="在售">在售</option>
                 <option value="已售">已售</option>
                 <option value="下架">下架</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">所属账号</label>
+              <select
+                value={form.account_id}
+                onChange={(e) => setForm({ ...form, account_id: e.target.value })}
+                className="w-full border border-gray-300 p-3 rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+              >
+                <option value="">未分配</option>
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>{account.name}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -265,8 +302,92 @@ export default function EditProduct() {
               </div>
             </form>
 
-            {/* 历史记录表格 */}
+            {/* 趋势图表 - 累计数据 */}
+            {stats.length > 0 && (
+              <div className="bg-white p-6 rounded-xl shadow-lg">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">累计数据趋势</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={[...stats].sort((a, b) => a.record_date.localeCompare(b.record_date))}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="record_date" tick={{ fontSize: 12 }} stroke="#6b7280" />
+                    <YAxis tick={{ fontSize: 12 }} stroke="#6b7280" />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                      labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
+                    />
+                    <Legend />
+                    <Line type="monotone" dataKey="exposures" name="曝光量" stroke="#f59e0b" strokeWidth={2} dot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="views" name="浏览量(累计)" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="favorites" name="想要数(累计)" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="inquiries" name="咨询数" stroke="#10b981" strokeWidth={2} dot={{ r: 4 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* 每日增长图表 */}
+            {stats.length > 0 && (
+              <div className="bg-white p-6 rounded-xl shadow-lg">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">每日增长趋势</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={getDailyGrowth()}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="record_date" tick={{ fontSize: 12 }} stroke="#6b7280" />
+                    <YAxis tick={{ fontSize: 12 }} stroke="#6b7280" />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                      labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
+                    />
+                    <Legend />
+                    <Line type="monotone" dataKey="exposures" name="曝光量" stroke="#f59e0b" strokeWidth={2} dot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="views_growth" name="浏览增长" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="favorites_growth" name="想要增长" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="inquiries" name="咨询数" stroke="#10b981" strokeWidth={2} dot={{ r: 4 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* 每日增长表格 */}
+            {stats.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                <h3 className="text-lg font-semibold text-gray-900 px-4 py-3 border-b border-gray-200">每日增长数据</h3>
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">日期</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">曝光量</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">浏览增长</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">想要增长</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">咨询数</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {getDailyGrowth().map((row, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-gray-900">{row.record_date}</td>
+                        <td className="px-4 py-3 text-gray-900">{row.exposures}</td>
+                        <td className="px-4 py-3 text-gray-900">
+                          <span className={row.views_growth > 0 ? "text-green-600" : row.views_growth < 0 ? "text-red-600" : ""}>
+                            {row.views_growth > 0 ? "+" : ""}{row.views_growth}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-900">
+                          <span className={row.favorites_growth > 0 ? "text-green-600" : row.favorites_growth < 0 ? "text-red-600" : ""}>
+                            {row.favorites_growth > 0 ? "+" : ""}{row.favorites_growth}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-900">{row.inquiries}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* 原始数据表格 */}
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+              <h3 className="text-lg font-semibold text-gray-900 px-4 py-3 border-b border-gray-200">原始记录数据</h3>
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>

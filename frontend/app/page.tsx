@@ -1,16 +1,25 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getProducts, deleteProduct, Product, getLatestStats, DailyStats } from "@/lib/api";
+import { getProducts, deleteProduct, Product, getLatestStats, DailyStats, getAccounts, Account, createAccount } from "@/lib/api";
 import Link from "next/link";
 
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
   const [productStats, setProductStats] = useState<Record<number, DailyStats | null>>({});
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [accountFilter, setAccountFilter] = useState<number | "all">("all");
   const [sortBy, setSortBy] = useState("newest");
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [newAccountName, setNewAccountName] = useState("");
+
+  const loadAccounts = async () => {
+    const data = await getAccounts();
+    setAccounts(data);
+  };
 
   const loadProducts = async () => {
     setLoading(true);
@@ -30,6 +39,7 @@ export default function Home() {
   };
 
   useEffect(() => {
+    loadAccounts();
     loadProducts();
   }, []);
 
@@ -40,12 +50,28 @@ export default function Home() {
     }
   };
 
+  const handleCreateAccount = async () => {
+    if (newAccountName.trim()) {
+      await createAccount({ name: newAccountName.trim() });
+      setNewAccountName("");
+      setShowAccountModal(false);
+      loadAccounts();
+    }
+  };
+
+  const getAccountName = (accountId: number | null) => {
+    if (!accountId) return "未分配";
+    const account = accounts.find(a => a.id === accountId);
+    return account ? account.name : "未知账号";
+  };
+
   const filteredProducts = products
     .filter((p) =>
       p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (p.category && p.category.toLowerCase().includes(searchTerm.toLowerCase()))
     )
     .filter((p) => statusFilter === "all" || p.status === statusFilter)
+    .filter((p) => accountFilter === "all" || p.account_id === accountFilter)
     .sort((a, b) => {
       if (sortBy === "newest") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       if (sortBy === "oldest") return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
@@ -87,6 +113,23 @@ export default function Home() {
             <option value="已售">已售</option>
             <option value="下架">下架</option>
           </select>
+          <select
+            value={accountFilter === "all" ? "all" : accountFilter.toString()}
+            onChange={(e) => setAccountFilter(e.target.value === "all" ? "all" : parseInt(e.target.value))}
+            className="px-4 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-gray-700 bg-white"
+          >
+            <option value="all">全部账号</option>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>{account.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => setShowAccountModal(true)}
+            className="px-4 py-2.5 border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 text-gray-700 bg-white"
+            title="管理账号"
+          >
+            + 账号
+          </button>
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
@@ -210,6 +253,49 @@ export default function Home() {
           </table>
         </div>
       </div>
+
+      {/* 账号管理弹窗 */}
+      {showAccountModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-96 shadow-2xl">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">添加新账号</h3>
+            <input
+              type="text"
+              placeholder="账号名称（如：主账号、小号1）"
+              value={newAccountName}
+              onChange={(e) => setNewAccountName(e.target.value)}
+              className="w-full border border-gray-300 p-3 rounded-lg text-gray-900 mb-4"
+              autoFocus
+            />
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => { setShowAccountModal(false); setNewAccountName(""); }}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleCreateAccount}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                添加
+              </button>
+            </div>
+            {accounts.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <p className="text-sm text-gray-500 mb-2">已有账号：</p>
+                <div className="flex flex-wrap gap-2">
+                  {accounts.map((account) => (
+                    <span key={account.id} className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">
+                      {account.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

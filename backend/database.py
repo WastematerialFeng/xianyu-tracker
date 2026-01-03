@@ -23,17 +23,29 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     
+    # 账号表
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            xianyu_id TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
     # 商品表
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id INTEGER,
             title TEXT NOT NULL,
             category TEXT,
             price REAL,
             description TEXT,
             image_original INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            status TEXT DEFAULT 'active'
+            status TEXT DEFAULT 'active',
+            FOREIGN KEY (account_id) REFERENCES accounts(id)
         )
     """)
     

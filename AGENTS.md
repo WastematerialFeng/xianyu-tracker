@@ -3,10 +3,10 @@
 > 继承自全局 AGENTS.md，以下为本项目特定规范
 
 ## 项目概述
-闲鱼发品追踪器 - 追踪闲鱼商品数据，分析商品表现
+闲鱼发品追踪器 - 追踪闲鱼商品数据，分析商品表现，支持多账号管理
 
 ## 技术栈
-- **前端**：Next.js 16 + React + TypeScript + Tailwind CSS
+- **前端**：Next.js 16 + React + TypeScript + Tailwind CSS + Recharts
 - **后端**：Python 3.14 + FastAPI + Uvicorn
 - **数据库**：SQLite（本地存储于 `data/xianyu.db`）
 
@@ -18,12 +18,13 @@ xianyu-tracker/
 │   │   ├── page.tsx       # 主页（商品列表）
 │   │   └── products/      # 商品相关页面
 │   │       ├── new/       # 添加商品
-│   │       └── [id]/      # 商品详情/编辑
+│   │       └── [id]/      # 商品详情/编辑/数据记录
 │   └── lib/api.ts         # API 调用封装
 ├── backend/               # FastAPI 后端
 │   ├── main.py            # API 路由
 │   └── database.py        # 数据库操作
 ├── data/                  # SQLite 数据库目录
+├── AGENTS.md              # 项目开发规范（本文件）
 ├── COMMIT-LOG.md          # 提交记录
 ├── start-backend.bat      # 后端启动脚本
 └── start-frontend.bat     # 前端启动脚本
@@ -31,10 +32,19 @@ xianyu-tracker/
 
 ## 数据库表结构
 
+### accounts（账号表）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER | 主键 |
+| name | TEXT | 账号名称 |
+| xianyu_id | TEXT | 闲鱼ID（可选）|
+| created_at | DATETIME | 创建时间 |
+
 ### products（商品表）
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | INTEGER | 主键 |
+| account_id | INTEGER | 所属账号ID（外键）|
 | title | TEXT | 商品标题 |
 | category | TEXT | 品类 |
 | price | REAL | 价格 |
@@ -49,15 +59,22 @@ xianyu-tracker/
 | id | INTEGER | 主键 |
 | product_id | INTEGER | 商品ID（外键）|
 | record_date | DATE | 记录日期 |
-| exposures | INTEGER | 曝光量 |
-| views | INTEGER | 浏览量 |
-| favorites | INTEGER | 想要数 |
-| inquiries | INTEGER | 咨询数 |
+| exposures | INTEGER | 曝光量（每日更新）|
+| views | INTEGER | 浏览量（累计值）|
+| favorites | INTEGER | 想要数（累计值）|
+| inquiries | INTEGER | 咨询数（每日更新）|
 
 ## API 端点
 
+### 账号管理
+- `GET /api/accounts` - 获取所有账号
+- `GET /api/accounts/{id}` - 获取单个账号
+- `POST /api/accounts` - 创建账号
+- `PUT /api/accounts/{id}` - 更新账号
+- `DELETE /api/accounts/{id}` - 删除账号
+
 ### 商品管理
-- `GET /api/products` - 获取所有商品
+- `GET /api/products` - 获取所有商品（支持 ?account_id= 筛选）
 - `GET /api/products/{id}` - 获取单个商品
 - `POST /api/products` - 创建商品
 - `PUT /api/products/{id}` - 更新商品
@@ -86,15 +103,23 @@ cd frontend && npm run dev
 - 页面组件放在 `app/` 目录下
 - API 调用统一通过 `lib/api.ts`
 - 使用 Tailwind CSS 进行样式开发
-- 表单验证在前端完成基础校验
+- 图表使用 Recharts 库
 
 ### 后端
 - API 路由统一以 `/api/` 开头
 - 使用 Pydantic 进行请求体验证
 - 数据库操作封装在 `database.py`
 
+### 文档同步规则（重要）
+- **修改数据库表结构时，必须同步更新本文件的"数据库表结构"部分**
+- **新增/修改 API 端点时，必须同步更新本文件的"API 端点"部分**
+- **新增依赖库时，必须同步更新本文件的"技术栈"部分**
+- **修改项目结构时，必须同步更新本文件的"项目结构"部分**
+
 ### 待开发功能
-- [ ] 趋势图表（数据可视化）
+- [x] 趋势图表（数据可视化）
+- [x] 多账号管理
+- [ ] 商品图片存储
 - [ ] AB 测试对比
 - [ ] 数据导出（CSV/Excel）
 - [ ] OCR 数据录入
