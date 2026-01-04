@@ -43,6 +43,7 @@ def init_db():
             price REAL,
             description TEXT,
             image_original INTEGER DEFAULT 0,
+            image_path TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             status TEXT DEFAULT 'active',
             FOREIGN KEY (account_id) REFERENCES accounts(id)

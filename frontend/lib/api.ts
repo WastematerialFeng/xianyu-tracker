@@ -13,6 +13,8 @@ export interface Product {
   price: number | null;
   description: string | null;
   image_original: number;
+  image_path: string | null;
+  images: string | null;  // JSON 字符串，需要解析
   created_at: string;
   status: string;
   account_id: number | null;
@@ -24,6 +26,8 @@ export interface ProductCreate {
   price?: number;
   description?: string;
   image_original?: number;
+  image_path?: string;
+  images?: string[];  // 多图片路径数组
   account_id?: number;
 }
 
@@ -177,4 +181,22 @@ export async function deleteAccount(id: number): Promise<void> {
   await fetch(`${API_BASE}/api/accounts/${id}`, {
     method: "DELETE",
   });
+}
+
+// ========== 图片上传 ==========
+
+export async function uploadImage(file: File): Promise<{ filename: string; path: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/api/upload/image`, {
+    method: "POST",
+    body: formData,
+  });
+  return res.json();
+}
+
+// 获取图片完整 URL
+export function getImageUrl(path: string | null): string | null {
+  if (!path) return null;
+  return `${API_BASE}${path}`;
 }

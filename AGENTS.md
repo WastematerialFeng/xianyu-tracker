@@ -6,8 +6,8 @@
 闲鱼发品追踪器 - 追踪闲鱼商品数据，分析商品表现，支持多账号管理
 
 ## 技术栈
-- **前端**：Next.js 16 + React + TypeScript + Tailwind CSS + Recharts
-- **后端**：Python 3.14 + FastAPI + Uvicorn
+- **前端**：Next.js 16 + React + TypeScript + Tailwind CSS + Recharts + @dnd-kit（拖拽排序）
+- **后端**：Python 3.14 + FastAPI + Uvicorn + python-multipart（文件上传）
 - **数据库**：SQLite（本地存储于 `data/xianyu.db`）
 
 ## 项目结构
@@ -50,6 +50,8 @@ xianyu-tracker/
 | price | REAL | 价格 |
 | description | TEXT | 商品文案 |
 | image_original | INTEGER | 图片是否原创（0/1）|
+| image_path | TEXT | 主图路径（第一张图）|
+| images | TEXT | 多图路径（JSON数组）|
 | status | TEXT | 状态（在售/已售/下架）|
 | created_at | DATETIME | 创建时间 |
 
@@ -86,6 +88,14 @@ xianyu-tracker/
 - `POST /api/stats` - 创建/更新数据记录
 - `DELETE /api/stats/{id}` - 删除数据记录
 
+### 图片上传
+- `POST /api/upload/image` - 上传图片（返回路径）
+- `GET /api/images/{filename}` - 获取图片
+
+### 数据导出
+- `GET /api/export/products` - 导出商品CSV
+- `GET /api/export/stats` - 导出数据记录CSV
+
 ## 启动方式
 ```bash
 # 后端（端口 8000）
@@ -115,14 +125,19 @@ cd frontend && npm run dev
 - **新增/修改 API 端点时，必须同步更新本文件的"API 端点"部分**
 - **新增依赖库时，必须同步更新本文件的"技术栈"部分**
 - **修改项目结构时，必须同步更新本文件的"项目结构"部分**
+- **功能完成后必须更新文档**：当用户提出的新功能开发完成并确认后，必须将该功能更新到相关的介绍文档（如本文件的"已完成功能"和"待开发功能"列表）
+
+### 已完成功能
+- [x] 商品 CRUD（增删改查）
+- [x] 数据记录（曝光量/浏览量/想要数/咨询数）
+- [x] 趋势图表（累计数据 + 每日增长）
+- [x] 多账号管理（筛选/编辑/删除）
+- [x] 主页行内展开数据录入
+- [x] 数据导出（CSV）
+- [x] 多图片存储（最多9张）
+- [x] 图片拖拽排序（第一张为主图）
 
 ### 待开发功能
-- [x] 趋势图表（数据可视化）
-- [x] 多账号管理
-- [x] 主页行内展开数据录入
-- [x] 账号编辑/删除功能
-- [x] 数据导出（CSV）
-- [ ] 商品图片存储
 - [ ] AB 测试对比
 - [ ] OCR 数据录入
 - [ ] **图片文字替换工具**（新页面）

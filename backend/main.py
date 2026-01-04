@@ -2,15 +2,22 @@
 FastAPI 主入口
 为什么用 FastAPI：轻量、自带 API 文档、异步支持好，符合 AGENTS.md 规范
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from database import get_connection, init_db
+from pathlib import Path
 import csv
 import io
+import uuid
+
+# 图片存储目录
+IMAGES_DIR = Path(__file__).parent.parent / "data" / "images"
+IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
 # 初始化数据库
 init_db()
@@ -36,6 +43,8 @@ class ProductCreate(BaseModel):
     price: Optional[float] = None
     description: Optional[str] = None
     image_original: Optional[int] = 0  # 0=非原创, 1=原创
+    image_path: Optional[str] = None  # 主图路径（兼容旧版）
+    images: Optional[List[str]] = None  # 多图片路径数组
     account_id: Optional[int] = None  # 所属账号
 
 
@@ -46,6 +55,8 @@ class ProductUpdate(BaseModel):
     price: Optional[float] = None
     description: Optional[str] = None
     image_original: Optional[int] = None
+    image_path: Optional[str] = None  # 主图路径
+    images: Optional[List[str]] = None  # 多图片路径数组
     status: Optional[str] = None
     account_id: Optional[int] = None  # 所属账号
 
@@ -119,13 +130,20 @@ def get_product(product_id: int):
 @app.post("/api/products")
 def create_product(product: ProductCreate):
     """创建商品"""
+    import json
     conn = get_connection()
     cursor = conn.cursor()
+    
+    # 处理 images 数组转 JSON
+    images_json = json.dumps(product.images) if product.images else None
+    # 如果有 images，第一张作为主图
+    image_path = product.image_path or (product.images[0] if product.images else None)
+    
     cursor.execute(
-        """INSERT INTO products (title, category, price, description, image_original, account_id)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO products (title, category, price, description, image_original, image_path, images, account_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (product.title, product.category, product.price, 
-         product.description, product.image_original, product.account_id)
+         product.description, product.image_original, image_path, images_json, product.account_id)
     )
     conn.commit()
     product_id = cursor.lastrowid
@@ -136,6 +154,7 @@ def create_product(product: ProductCreate):
 @app.put("/api/products/{product_id}")
 def update_product(product_id: int, product: ProductUpdate):
     """更新商品"""
+    import json
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -150,8 +169,17 @@ def update_product(product_id: int, product: ProductUpdate):
     values = []
     for field, value in product.model_dump(exclude_unset=True).items():
         if value is not None:
+            # images 字段需要转 JSON
+            if field == "images":
+                value = json.dumps(value)
             updates.append(f"{field} = ?")
             values.append(value)
+    
+    # 如果更新了 images，同时更新 image_path 为第一张
+    if product.images and len(product.images) > 0:
+        if "image_path = ?" not in updates:
+            updates.append("image_path = ?")
+            values.append(product.images[0])
     
     if updates:
         values.append(product_id)
@@ -394,6 +422,37 @@ def export_stats_csv():
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=stats.csv"}
     )
+
+
+# ========== 图片上传 API ==========
+
+@app.post("/api/upload/image")
+async def upload_image(file: UploadFile = File(...)):
+    """上传图片，返回图片路径"""
+    # 验证文件类型
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="只能上传图片文件")
+    
+    # 生成唯一文件名
+    ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    filepath = IMAGES_DIR / filename
+    
+    # 保存文件
+    content = await file.read()
+    with open(filepath, "wb") as f:
+        f.write(content)
+    
+    return {"filename": filename, "path": f"/api/images/{filename}"}
+
+
+@app.get("/api/images/{filename}")
+def get_image(filename: str):
+    """获取图片"""
+    filepath = IMAGES_DIR / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="图片不存在")
+    return FileResponse(filepath)
 
 
 if __name__ == "__main__":

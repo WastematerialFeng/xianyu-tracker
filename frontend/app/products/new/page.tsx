@@ -2,8 +2,11 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createProduct, getAccounts, Account } from "@/lib/api";
+import { createProduct, getAccounts, Account, uploadImage } from "@/lib/api";
 import Link from "next/link";
+import { DndContext, closestCenter, DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, useSortable, arrayMove, rectSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 const CATEGORIES = [
   "数码产品", "手机配件", "电脑硬件", "服饰鞋包", "美妆护肤",
@@ -11,12 +14,45 @@ const CATEGORIES = [
   "虚拟物品", "其他"
 ];
 
+// 可排序图片组件
+interface SortableImageProps {
+  id: string;
+  preview: string;
+  index: number;
+  onRemove: (index: number) => void;
+}
+
+function SortableImage({ id, preview, index, onRemove }: SortableImageProps) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="relative group cursor-grab active:cursor-grabbing">
+      <div {...attributes} {...listeners}>
+        <img src={preview} alt={`图片${index + 1}`} className="w-full h-16 object-cover rounded-lg" />
+        {index === 0 && <span className="absolute top-0 left-0 bg-blue-500 text-white text-xs px-1 rounded-br">主图</span>}
+      </div>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onRemove(index); }}
+        className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 export default function NewProduct() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [images, setImages] = useState<string[]>([]);
+  const [images, setImages] = useState<{ preview: string; file: File }[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({
     title: "",
     category: "",
@@ -37,7 +73,7 @@ export default function NewProduct() {
       if (file.type.startsWith("image/") && images.length < 9) {
         const reader = new FileReader();
         reader.onload = (e) => {
-          setImages((prev) => prev.length < 9 ? [...prev, e.target?.result as string] : prev);
+          setImages((prev) => prev.length < 9 ? [...prev, { preview: e.target?.result as string, file }] : prev);
         };
         reader.readAsDataURL(file);
       }
@@ -83,14 +119,36 @@ export default function NewProduct() {
     setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // 拖拽排序处理
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setImages((prev) => {
+        const oldIndex = prev.findIndex((_, i) => `img-${i}` === active.id);
+        const newIndex = prev.findIndex((_, i) => `img-${i}` === over.id);
+        return arrayMove(prev, oldIndex, newIndex);
+      });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setUploading(true);
+    
+    // 上传所有图片
+    const uploadedPaths: string[] = [];
+    for (const img of images) {
+      const result = await uploadImage(img.file);
+      uploadedPaths.push(result.path);
+    }
+    
     await createProduct({
       title: form.title,
       category: form.category || undefined,
       price: form.price ? parseFloat(form.price) : undefined,
       description: form.description || undefined,
       image_original: form.image_original,
+      images: uploadedPaths.length > 0 ? uploadedPaths : undefined,
       account_id: form.account_id ? parseInt(form.account_id) : undefined,
     });
     router.push("/");
@@ -113,45 +171,48 @@ export default function NewProduct() {
               className="hidden"
             />
             <div
-              onClick={handleClick}
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
               onDragLeave={() => setIsDragging(false)}
-              className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
-                isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-blue-400"
+              className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
+                isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300"
               }`}
             >
               {images.length === 0 ? (
-                <>
+                <div onClick={handleClick} className="cursor-pointer text-center">
                   <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
                   <p className="mt-2 text-sm text-gray-600">点击、拖拽或 Ctrl+V 粘贴上传图片</p>
                   <p className="mt-1 text-xs text-gray-400">支持 JPG、PNG，最多 9 张</p>
-                </>
-              ) : (
-                <div className="grid grid-cols-5 gap-3">
-                  {images.map((img, idx) => (
-                    <div key={idx} className="relative group">
-                      <img src={img} alt={`图片${idx + 1}`} className="w-full h-16 object-cover rounded-lg" />
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); removeImage(idx); }}
-                        className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                  {images.length < 9 && (
-                    <div className="w-full h-16 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center text-gray-400 text-2xl">
-                      +
-                    </div>
-                  )}
                 </div>
+              ) : (
+                <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                  <SortableContext items={images.map((_, i) => `img-${i}`)} strategy={rectSortingStrategy}>
+                    <div className="grid grid-cols-5 gap-3">
+                      {images.map((img, idx) => (
+                        <SortableImage
+                          key={`img-${idx}`}
+                          id={`img-${idx}`}
+                          preview={img.preview}
+                          index={idx}
+                          onRemove={removeImage}
+                        />
+                      ))}
+                      {images.length < 9 && (
+                        <div 
+                          onClick={handleClick}
+                          className="w-full h-16 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center text-gray-400 text-2xl cursor-pointer hover:border-blue-400"
+                        >
+                          +
+                        </div>
+                      )}
+                    </div>
+                  </SortableContext>
+                </DndContext>
               )}
             </div>
-            <p className="mt-2 text-xs text-gray-500">已上传 {images.length}/9 张</p>
+            <p className="mt-2 text-xs text-gray-500">已上传 {images.length}/9 张，拖拽可调整顺序</p>
           </div>
 
           {/* 标题 */}
@@ -253,10 +314,11 @@ export default function NewProduct() {
               取消
             </Link>
             <button 
-              type="submit" 
-              className="px-6 py-2.5 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700 hover:shadow-lg transition-all font-medium"
+              type="submit"
+              disabled={uploading}
+              className="px-6 py-2.5 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700 hover:shadow-lg transition-all font-medium disabled:bg-gray-400"
             >
-              保存商品
+              {uploading ? "保存中..." : "保存商品"}
             </button>
           </div>
         </form>
