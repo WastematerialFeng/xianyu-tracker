@@ -4,10 +4,13 @@ FastAPI 主入口
 """
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 from database import get_connection, init_db
+import csv
+import io
 
 # 初始化数据库
 init_db()
@@ -330,6 +333,67 @@ def delete_account(account_id: int):
     conn.commit()
     conn.close()
     return {"message": "删除成功"}
+
+
+# ========== 数据导出 API ==========
+
+@app.get("/api/export/products")
+def export_products_csv():
+    """导出商品列表为 CSV"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT p.id, p.title, p.category, p.price, p.status, p.created_at,
+               a.name as account_name
+        FROM products p
+        LEFT JOIN accounts a ON p.account_id = a.id
+        ORDER BY p.created_at DESC
+    """)
+    products = cursor.fetchall()
+    conn.close()
+    
+    # 生成 CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["ID", "商品标题", "品类", "价格", "状态", "创建时间", "所属账号"])
+    for p in products:
+        writer.writerow([p["id"], p["title"], p["category"], p["price"], p["status"], p["created_at"], p["account_name"] or "未分配"])
+    
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=products.csv"}
+    )
+
+
+@app.get("/api/export/stats")
+def export_stats_csv():
+    """导出所有数据记录为 CSV"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT ds.record_date, p.title, ds.exposures, ds.views, ds.favorites, ds.inquiries
+        FROM daily_stats ds
+        JOIN products p ON ds.product_id = p.id
+        ORDER BY ds.record_date DESC, p.title
+    """)
+    stats = cursor.fetchall()
+    conn.close()
+    
+    # 生成 CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["日期", "商品标题", "曝光量", "浏览量", "想要数", "咨询数"])
+    for s in stats:
+        writer.writerow([s["record_date"], s["title"], s["exposures"] or 0, s["views"], s["favorites"], s["inquiries"]])
+    
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=stats.csv"}
+    )
 
 
 if __name__ == "__main__":

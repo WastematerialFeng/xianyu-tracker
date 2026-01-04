@@ -211,6 +211,16 @@ export default function Home() {
           >
             + 账号
           </button>
+          {/* 导出按钮 */}
+          <div className="relative group">
+            <button className="px-4 py-2.5 border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 text-gray-700 bg-white">
+              导出 ▼
+            </button>
+            <div className="absolute right-0 top-full w-40 bg-white border border-gray-200 rounded-lg shadow-lg hidden group-hover:block z-10">
+              <a href="http://localhost:8000/api/export/products" className="block px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-t-lg">导出商品列表</a>
+              <a href="http://localhost:8000/api/export/stats" className="block px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-b-lg">导出数据记录</a>
+            </div>
+          </div>
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
