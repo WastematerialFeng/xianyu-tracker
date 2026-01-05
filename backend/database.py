@@ -66,6 +66,53 @@ def init_db():
         )
     """)
     
+    # 爬虫任务表
+    # 为什么需要：管理多个爬取任务，支持不同关键词和筛选条件
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS crawler_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            keyword TEXT NOT NULL,
+            min_price REAL,
+            max_price REAL,
+            personal_only INTEGER DEFAULT 0,
+            max_pages INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'idle',
+            last_run DATETIME,
+            items_count INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # 爬取的商品数据表
+    # 为什么需要：存储从闲鱼爬取的原始商品数据，与手动录入的商品分开管理
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS crawled_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER,
+            item_id TEXT UNIQUE,
+            title TEXT,
+            price REAL,
+            seller_id TEXT,
+            seller_name TEXT,
+            location TEXT,
+            want_count INTEGER DEFAULT 0,
+            image_url TEXT,
+            images TEXT,
+            detail_data TEXT,
+            crawled_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            synced_to_product INTEGER DEFAULT 0,
+            FOREIGN KEY (task_id) REFERENCES crawler_tasks(id)
+        )
+    """)
+    
+    # 检查 products 表是否有 images 字段，没有则添加
+    cursor.execute("PRAGMA table_info(products)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'images' not in columns:
+        cursor.execute("ALTER TABLE products ADD COLUMN images TEXT")
+        print("已添加 products.images 字段")
+    
     conn.commit()
     conn.close()
     print("数据库初始化完成")

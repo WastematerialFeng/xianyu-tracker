@@ -20,8 +20,8 @@ from dotenv import load_dotenv
 
 # 加载环境变量
 load_dotenv()
-BANANA_API_KEY = os.getenv("BANANA_API_KEY", "")
-BANANA_API_BASE = "https://api.bananain.top/v1"
+SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
+SILICONFLOW_API_BASE = "https://api.siliconflow.cn/v1"
 
 # 图片存储目录
 IMAGES_DIR = Path(__file__).parent.parent / "data" / "images"
@@ -478,71 +478,402 @@ class ImageGenerateRequest(BaseModel):
 @app.post("/api/tools/generate-image")
 async def generate_image(request: ImageGenerateRequest):
     """
-    AI 图片生成接口
-    支持三种模式：文生图(generate)、图生图(edit)、局部重绘(inpaint)
+    AI 图片生成接口 - 使用 SiliconFlow API
+    支持文生图模式
     """
-    if not BANANA_API_KEY:
+    if not SILICONFLOW_API_KEY:
         raise HTTPException(status_code=500, detail="API Key 未配置")
     
     headers = {
-        "Authorization": f"Bearer {BANANA_API_KEY}",
+        "Authorization": f"Bearer {SILICONFLOW_API_KEY}",
         "Content-Type": "application/json"
     }
     
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
-            if request.mode == "generate":
-                # 文生图模式
-                response = await client.post(
-                    f"{BANANA_API_BASE}/images/generations",
-                    headers=headers,
-                    json={
-                        "model": "gpt-image-1",
-                        "prompt": request.prompt,
-                        "n": request.n,
-                        "size": request.size
-                    }
-                )
-            else:
-                # 图生图 / 局部重绘模式
-                if not request.image:
-                    raise HTTPException(status_code=400, detail="图生图模式需要上传参考图")
-                
-                payload = {
-                    "model": "gpt-image-1",
+            response = await client.post(
+                f"{SILICONFLOW_API_BASE}/images/generations",
+                headers=headers,
+                json={
+                    "model": "black-forest-labs/FLUX.1-schnell",
                     "prompt": request.prompt,
-                    "image": request.image,
-                    "n": request.n,
-                    "size": request.size
+                    "image_size": request.size,
+                    "num_inference_steps": 20
                 }
-                
-                # 局部重绘需要 mask
-                if request.mode == "inpaint" and request.mask:
-                    payload["mask"] = request.mask
-                
-                response = await client.post(
-                    f"{BANANA_API_BASE}/images/edits",
-                    headers=headers,
-                    json=payload
-                )
+            )
             
             result = response.json()
+            print(f"API Response: {result}")
             
-            # 检查错误
             if response.status_code != 200:
-                error_msg = result.get("error", {}).get("message", "生成失败")
-                if "insufficient" in error_msg.lower() or "balance" in error_msg.lower():
-                    return {"images": [], "error": "余额不足，请充值后重试"}
-                return {"images": [], "error": error_msg}
+                error_msg = result.get("message") or result.get("error", {}).get("message", "生成失败")
+                return {"images": [], "error": str(error_msg)}
             
-            # 提取图片 URL
-            images = [item.get("url") or item.get("b64_json") for item in result.get("data", [])]
+            images = []
+            for item in result.get("images", []) or result.get("data", []):
+                if isinstance(item, dict):
+                    img = item.get("url")
+                    if img:
+                        images.append(img)
+            
             return {"images": images, "error": None}
             
     except httpx.TimeoutException:
         return {"images": [], "error": "请求超时，请稍后重试"}
     except Exception as e:
         return {"images": [], "error": f"生成失败: {str(e)}"}
+
+
+# ==================== 爬虫相关 API ====================
+# 为什么需要：管理闲鱼爬虫任务，实现自动获取商品数据
+
+import json
+import asyncio
+from crawler.scraper import XianyuCrawler
+from crawler.config import STATE_FILE
+
+# 全局爬虫实例（用于控制运行状态）
+_crawler_instance: XianyuCrawler = None
+_crawler_logs: List[str] = []
+
+
+class CrawlerTaskCreate(BaseModel):
+    """创建爬虫任务的请求体"""
+    name: str
+    keyword: str
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    personal_only: bool = False
+    max_pages: int = 1
+
+
+class CrawlerTaskUpdate(BaseModel):
+    """更新爬虫任务的请求体"""
+    name: Optional[str] = None
+    keyword: Optional[str] = None
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    personal_only: Optional[bool] = None
+    max_pages: Optional[int] = None
+
+
+class LoginStateData(BaseModel):
+    """登录状态数据"""
+    cookies: List[dict]
+    origins: Optional[List[dict]] = None
+
+
+# ========== 登录状态管理 ==========
+
+@app.get("/api/crawler/login-state/check")
+def check_login_state():
+    """检查登录状态是否有效"""
+    if not STATE_FILE.exists():
+        return {"valid": False, "message": "登录状态文件不存在"}
+    
+    try:
+        with open(STATE_FILE, 'r', encoding='utf-8') as f:
+            state = json.load(f)
+        
+        cookies = state.get('cookies', [])
+        if not cookies:
+            return {"valid": False, "message": "没有 Cookie 数据"}
+        
+        # 检查闲鱼相关 cookie
+        xianyu_cookies = [c for c in cookies if 'goofish' in c.get('domain', '') or 'taobao' in c.get('domain', '')]
+        if not xianyu_cookies:
+            return {"valid": False, "message": "未找到闲鱼相关 Cookie"}
+        
+        return {"valid": True, "message": f"找到 {len(xianyu_cookies)} 个闲鱼 Cookie", "cookie_count": len(xianyu_cookies)}
+    except Exception as e:
+        return {"valid": False, "message": f"检查失败: {str(e)}"}
+
+
+@app.post("/api/crawler/login-state")
+def save_login_state(data: LoginStateData):
+    """保存登录状态（从 Chrome 扩展获取）"""
+    try:
+        state_data = {"cookies": data.cookies}
+        if data.origins:
+            state_data["origins"] = data.origins
+        
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(state_data, f, ensure_ascii=False, indent=2)
+        
+        return {"success": True, "message": "登录状态保存成功"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存失败: {str(e)}")
+
+
+# ========== 爬虫任务管理 ==========
+
+@app.get("/api/crawler/tasks")
+def get_crawler_tasks():
+    """获取所有爬虫任务"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM crawler_tasks ORDER BY created_at DESC")
+    tasks = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return {"data": tasks}
+
+
+@app.get("/api/crawler/tasks/{task_id}")
+def get_crawler_task(task_id: int):
+    """获取单个爬虫任务"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM crawler_tasks WHERE id = ?", (task_id,))
+    task = cursor.fetchone()
+    conn.close()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return {"data": dict(task)}
+
+
+@app.post("/api/crawler/tasks")
+def create_crawler_task(task: CrawlerTaskCreate):
+    """创建爬虫任务"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT INTO crawler_tasks (name, keyword, min_price, max_price, personal_only, max_pages)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (task.name, task.keyword, task.min_price, task.max_price, 
+         1 if task.personal_only else 0, task.max_pages)
+    )
+    conn.commit()
+    task_id = cursor.lastrowid
+    conn.close()
+    return {"message": "创建成功", "id": task_id}
+
+
+@app.put("/api/crawler/tasks/{task_id}")
+def update_crawler_task(task_id: int, task: CrawlerTaskUpdate):
+    """更新爬虫任务"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id FROM crawler_tasks WHERE id = ?", (task_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    updates = []
+    values = []
+    for field, value in task.model_dump(exclude_unset=True).items():
+        if value is not None:
+            if field == "personal_only":
+                value = 1 if value else 0
+            updates.append(f"{field} = ?")
+            values.append(value)
+    
+    if updates:
+        values.append(task_id)
+        cursor.execute(f"UPDATE crawler_tasks SET {', '.join(updates)} WHERE id = ?", values)
+        conn.commit()
+    
+    conn.close()
+    return {"message": "更新成功"}
+
+
+@app.delete("/api/crawler/tasks/{task_id}")
+def delete_crawler_task(task_id: int):
+    """删除爬虫任务"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM crawler_tasks WHERE id = ?", (task_id,))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="任务不存在")
+    # 同时删除该任务的爬取结果
+    cursor.execute("DELETE FROM crawled_items WHERE task_id = ?", (task_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "删除成功"}
+
+
+# ========== 爬虫执行控制 ==========
+
+@app.post("/api/crawler/tasks/{task_id}/run")
+async def run_crawler_task(task_id: int):
+    """执行爬虫任务"""
+    global _crawler_instance, _crawler_logs
+    
+    # 检查登录状态
+    if not STATE_FILE.exists():
+        raise HTTPException(status_code=400, detail="请先配置登录状态")
+    
+    # 获取任务配置
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM crawler_tasks WHERE id = ?", (task_id,))
+    task = cursor.fetchone()
+    if not task:
+        conn.close()
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    task_dict = dict(task)
+    
+    # 检查是否已在运行
+    if _crawler_instance and _crawler_instance.is_running:
+        conn.close()
+        raise HTTPException(status_code=400, detail="已有任务在运行中")
+    
+    # 更新任务状态
+    cursor.execute("UPDATE crawler_tasks SET status = 'running' WHERE id = ?", (task_id,))
+    conn.commit()
+    conn.close()
+    
+    # 清空日志
+    _crawler_logs = []
+    
+    def log_callback(msg: str):
+        _crawler_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+    
+    # 创建爬虫实例并执行
+    _crawler_instance = XianyuCrawler(on_progress=log_callback)
+    
+    try:
+        items = await _crawler_instance.search(
+            keyword=task_dict['keyword'],
+            max_pages=task_dict['max_pages'],
+            min_price=task_dict['min_price'],
+            max_price=task_dict['max_price'],
+            personal_only=bool(task_dict['personal_only'])
+        )
+        
+        # 保存爬取结果
+        conn = get_connection()
+        cursor = conn.cursor()
+        saved_count = 0
+        
+        for item in items:
+            try:
+                cursor.execute(
+                    """INSERT OR IGNORE INTO crawled_items 
+                       (task_id, item_id, title, price, seller_id, seller_name, location, want_count, image_url)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (task_id, item.get('商品ID'), item.get('商品标题'), item.get('商品价格'),
+                     item.get('卖家ID'), item.get('卖家昵称'), item.get('发布地点'),
+                     item.get('"想要"人数', 0), item.get('商品主图链接'))
+                )
+                if cursor.rowcount > 0:
+                    saved_count += 1
+            except Exception as e:
+                print(f"保存商品失败: {e}")
+        
+        # 更新任务状态
+        cursor.execute(
+            "UPDATE crawler_tasks SET status = 'idle', last_run = ?, items_count = items_count + ? WHERE id = ?",
+            (datetime.now().isoformat(), saved_count, task_id)
+        )
+        conn.commit()
+        conn.close()
+        
+        return {"success": True, "message": f"爬取完成，新增 {saved_count} 个商品", "items_count": len(items)}
+        
+    except Exception as e:
+        # 更新任务状态为错误
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE crawler_tasks SET status = 'error' WHERE id = ?", (task_id,))
+        conn.commit()
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"爬取失败: {str(e)}")
+
+
+@app.post("/api/crawler/tasks/{task_id}/stop")
+def stop_crawler_task(task_id: int):
+    """停止爬虫任务"""
+    global _crawler_instance
+    
+    if _crawler_instance:
+        _crawler_instance.stop()
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE crawler_tasks SET status = 'idle' WHERE id = ?", (task_id,))
+        conn.commit()
+        conn.close()
+        return {"success": True, "message": "已发送停止信号"}
+    
+    return {"success": False, "message": "没有正在运行的任务"}
+
+
+@app.get("/api/crawler/logs")
+def get_crawler_logs():
+    """获取爬虫运行日志"""
+    return {"logs": _crawler_logs}
+
+
+# ========== 爬取结果管理 ==========
+
+@app.get("/api/crawler/items")
+def get_crawled_items(task_id: Optional[int] = None, synced: Optional[int] = None):
+    """获取爬取的商品列表"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    query = "SELECT * FROM crawled_items WHERE 1=1"
+    params = []
+    
+    if task_id:
+        query += " AND task_id = ?"
+        params.append(task_id)
+    if synced is not None:
+        query += " AND synced_to_product = ?"
+        params.append(synced)
+    
+    query += " ORDER BY crawled_at DESC"
+    cursor.execute(query, params)
+    items = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return {"data": items}
+
+
+@app.delete("/api/crawler/items/{item_id}")
+def delete_crawled_item(item_id: int):
+    """删除爬取的商品"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM crawled_items WHERE id = ?", (item_id,))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="商品不存在")
+    conn.commit()
+    conn.close()
+    return {"message": "删除成功"}
+
+
+@app.post("/api/crawler/items/{item_id}/sync")
+def sync_crawled_item_to_product(item_id: int, account_id: Optional[int] = None):
+    """将爬取的商品同步到商品追踪表"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM crawled_items WHERE id = ?", (item_id,))
+    item = cursor.fetchone()
+    if not item:
+        conn.close()
+        raise HTTPException(status_code=404, detail="商品不存在")
+    
+    item_dict = dict(item)
+    
+    cursor.execute(
+        """INSERT INTO products (title, price, description, image_path, account_id)
+           VALUES (?, ?, ?, ?, ?)""",
+        (item_dict['title'], item_dict['price'], 
+         f"从闲鱼爬取 - 卖家: {item_dict['seller_name']}", 
+         item_dict['image_url'], account_id)
+    )
+    product_id = cursor.lastrowid
+    
+    cursor.execute("UPDATE crawled_items SET synced_to_product = 1 WHERE id = ?", (item_id,))
+    conn.commit()
+    conn.close()
+    
+    return {"message": "同步成功", "product_id": product_id}
 
 
 if __name__ == "__main__":

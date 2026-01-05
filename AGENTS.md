@@ -7,9 +7,10 @@
 
 ## 技术栈
 - **前端**：Next.js 16 + React + TypeScript + Tailwind CSS + Recharts + @dnd-kit（拖拽排序）
-- **后端**：Python 3.14 + FastAPI + Uvicorn + python-multipart（文件上传）+ httpx（HTTP客户端）
+- **后端**：Python 3.14 + FastAPI + Uvicorn + python-multipart（文件上传）+ httpx（HTTP客户端）+ Playwright（浏览器自动化）
 - **数据库**：SQLite（本地存储于 `data/xianyu.db`）
-- **AI API**：Nano Banana Pro（图片生成）
+- **AI API**：SiliconFlow（图片生成）
+- **爬虫**：Playwright + playwright-stealth（闲鱼数据爬取）
 
 ## 项目结构
 ```
@@ -21,11 +22,20 @@ xianyu-tracker/
 │   │   │   ├── new/       # 添加商品
 │   │   │   └── [id]/      # 商品详情/编辑/数据记录
 │   │   └── tools/         # 工具页面
-│   │       └── image-generator/  # AI 图片生成器
+│   │       ├── image-generator/  # AI 图片生成器
+│   │       └── crawler/          # 闲鱼爬虫管理
 │   └── lib/api.ts         # API 调用封装
 ├── backend/               # FastAPI 后端
 │   ├── main.py            # API 路由
 │   ├── database.py        # 数据库操作
+│   ├── crawler/           # 爬虫模块
+│   │   ├── __init__.py
+│   │   ├── config.py      # 爬虫配置
+│   │   ├── scraper.py     # 核心爬虫逻辑
+│   │   ├── parsers.py     # 数据解析器
+│   │   └── utils.py       # 工具函数
+│   ├── state/             # 登录状态存储
+│   │   └── xianyu_state.json
 │   └── .env               # 环境变量（API Key）
 ├── data/                  # SQLite 数据库目录
 ├── AGENTS.md              # 项目开发规范（本文件）
@@ -70,6 +80,37 @@ xianyu-tracker/
 | favorites | INTEGER | 想要数（累计值）|
 | inquiries | INTEGER | 咨询数（每日更新）|
 
+### crawler_tasks（爬虫任务表）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER | 主键 |
+| name | TEXT | 任务名称 |
+| keyword | TEXT | 搜索关键词 |
+| min_price | REAL | 最低价格 |
+| max_price | REAL | 最高价格 |
+| personal_only | INTEGER | 仅个人闲置（0/1）|
+| max_pages | INTEGER | 最大页数 |
+| status | TEXT | 状态（idle/running/error）|
+| last_run | DATETIME | 上次运行时间 |
+| items_count | INTEGER | 已爬取商品数 |
+| created_at | DATETIME | 创建时间 |
+
+### crawled_items（爬取商品表）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER | 主键 |
+| task_id | INTEGER | 任务ID（外键）|
+| item_id | TEXT | 闲鱼商品ID（唯一）|
+| title | TEXT | 商品标题 |
+| price | REAL | 价格 |
+| seller_id | TEXT | 卖家ID |
+| seller_name | TEXT | 卖家昵称 |
+| location | TEXT | 发布地点 |
+| want_count | INTEGER | 想要人数 |
+| image_url | TEXT | 主图链接 |
+| crawled_at | DATETIME | 爬取时间 |
+| synced_to_product | INTEGER | 是否已同步（0/1）|
+
 ## API 端点
 
 ### 账号管理
@@ -108,6 +149,21 @@ xianyu-tracker/
   - mask: base64 遮罩图（局部重绘可选）
   - n: 生成数量（1-4）
   - size: 尺寸（1024x1024 等）
+
+### 爬虫管理
+- `GET /api/crawler/login-state/check` - 检查登录状态
+- `POST /api/crawler/login-state` - 保存登录状态（Cookie）
+- `GET /api/crawler/tasks` - 获取所有爬虫任务
+- `GET /api/crawler/tasks/{id}` - 获取单个任务
+- `POST /api/crawler/tasks` - 创建爬虫任务
+- `PUT /api/crawler/tasks/{id}` - 更新任务
+- `DELETE /api/crawler/tasks/{id}` - 删除任务
+- `POST /api/crawler/tasks/{id}/run` - 执行爬虫任务
+- `POST /api/crawler/tasks/{id}/stop` - 停止任务
+- `GET /api/crawler/logs` - 获取运行日志
+- `GET /api/crawler/items` - 获取爬取的商品（支持 ?task_id= 筛选）
+- `DELETE /api/crawler/items/{id}` - 删除爬取商品
+- `POST /api/crawler/items/{id}/sync` - 同步到商品追踪表
 
 ## 启动方式
 ```bash
@@ -150,7 +206,9 @@ cd frontend && npm run dev
 - [x] 多图片存储（最多9张）
 - [x] 图片拖拽排序（第一张为主图）
 - [x] AI 商品主图生成器（文生图/图生图/局部重绘）
+- [x] 闲鱼自动爬虫（Playwright + 反检测）
 
 ### 待开发功能
 - [ ] AB 测试对比
 - [ ] OCR 数据录入
+- [ ] 定时爬取任务
