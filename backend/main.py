@@ -14,6 +14,14 @@ from pathlib import Path
 import csv
 import io
 import uuid
+import os
+import httpx
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
+BANANA_API_KEY = os.getenv("BANANA_API_KEY", "")
+BANANA_API_BASE = "https://api.bananain.top/v1"
 
 # 图片存储目录
 IMAGES_DIR = Path(__file__).parent.parent / "data" / "images"
@@ -453,6 +461,88 @@ def get_image(filename: str):
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="图片不存在")
     return FileResponse(filepath)
+
+
+# ==================== AI 图片生成 API ====================
+
+class ImageGenerateRequest(BaseModel):
+    """AI 图片生成请求"""
+    mode: str  # "generate" | "edit" | "inpaint"
+    prompt: str
+    image: Optional[str] = None  # base64 参考图
+    mask: Optional[str] = None   # base64 遮罩图（局部重绘用）
+    n: int = 1  # 生成数量 1-4
+    size: str = "1024x1024"  # 图片尺寸
+
+
+@app.post("/api/tools/generate-image")
+async def generate_image(request: ImageGenerateRequest):
+    """
+    AI 图片生成接口
+    支持三种模式：文生图(generate)、图生图(edit)、局部重绘(inpaint)
+    """
+    if not BANANA_API_KEY:
+        raise HTTPException(status_code=500, detail="API Key 未配置")
+    
+    headers = {
+        "Authorization": f"Bearer {BANANA_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            if request.mode == "generate":
+                # 文生图模式
+                response = await client.post(
+                    f"{BANANA_API_BASE}/images/generations",
+                    headers=headers,
+                    json={
+                        "model": "gpt-image-1",
+                        "prompt": request.prompt,
+                        "n": request.n,
+                        "size": request.size
+                    }
+                )
+            else:
+                # 图生图 / 局部重绘模式
+                if not request.image:
+                    raise HTTPException(status_code=400, detail="图生图模式需要上传参考图")
+                
+                payload = {
+                    "model": "gpt-image-1",
+                    "prompt": request.prompt,
+                    "image": request.image,
+                    "n": request.n,
+                    "size": request.size
+                }
+                
+                # 局部重绘需要 mask
+                if request.mode == "inpaint" and request.mask:
+                    payload["mask"] = request.mask
+                
+                response = await client.post(
+                    f"{BANANA_API_BASE}/images/edits",
+                    headers=headers,
+                    json=payload
+                )
+            
+            result = response.json()
+            
+            # 检查错误
+            if response.status_code != 200:
+                error_msg = result.get("error", {}).get("message", "生成失败")
+                if "insufficient" in error_msg.lower() or "balance" in error_msg.lower():
+                    return {"images": [], "error": "余额不足，请充值后重试"}
+                return {"images": [], "error": error_msg}
+            
+            # 提取图片 URL
+            images = [item.get("url") or item.get("b64_json") for item in result.get("data", [])]
+            return {"images": images, "error": None}
+            
+    except httpx.TimeoutException:
+        return {"images": [], "error": "请求超时，请稍后重试"}
+    except Exception as e:
+        return {"images": [], "error": f"生成失败: {str(e)}"}
 
 
 if __name__ == "__main__":

@@ -7,8 +7,9 @@
 
 ## 技术栈
 - **前端**：Next.js 16 + React + TypeScript + Tailwind CSS + Recharts + @dnd-kit（拖拽排序）
-- **后端**：Python 3.14 + FastAPI + Uvicorn + python-multipart（文件上传）
+- **后端**：Python 3.14 + FastAPI + Uvicorn + python-multipart（文件上传）+ httpx（HTTP客户端）
 - **数据库**：SQLite（本地存储于 `data/xianyu.db`）
+- **AI API**：Nano Banana Pro（图片生成）
 
 ## 项目结构
 ```
@@ -16,13 +17,16 @@ xianyu-tracker/
 ├── frontend/              # Next.js 前端
 │   ├── app/               # App Router 页面
 │   │   ├── page.tsx       # 主页（商品列表）
-│   │   └── products/      # 商品相关页面
-│   │       ├── new/       # 添加商品
-│   │       └── [id]/      # 商品详情/编辑/数据记录
+│   │   ├── products/      # 商品相关页面
+│   │   │   ├── new/       # 添加商品
+│   │   │   └── [id]/      # 商品详情/编辑/数据记录
+│   │   └── tools/         # 工具页面
+│   │       └── image-generator/  # AI 图片生成器
 │   └── lib/api.ts         # API 调用封装
 ├── backend/               # FastAPI 后端
 │   ├── main.py            # API 路由
-│   └── database.py        # 数据库操作
+│   ├── database.py        # 数据库操作
+│   └── .env               # 环境变量（API Key）
 ├── data/                  # SQLite 数据库目录
 ├── AGENTS.md              # 项目开发规范（本文件）
 ├── COMMIT-LOG.md          # 提交记录
@@ -96,6 +100,15 @@ xianyu-tracker/
 - `GET /api/export/products` - 导出商品CSV
 - `GET /api/export/stats` - 导出数据记录CSV
 
+### AI 图片生成
+- `POST /api/tools/generate-image` - AI 生成图片
+  - mode: "generate"（文生图）| "edit"（图生图）| "inpaint"（局部重绘）
+  - prompt: 提示词
+  - image: base64 参考图（图生图/局部重绘必填）
+  - mask: base64 遮罩图（局部重绘可选）
+  - n: 生成数量（1-4）
+  - size: 尺寸（1024x1024 等）
+
 ## 启动方式
 ```bash
 # 后端（端口 8000）
@@ -136,11 +149,8 @@ cd frontend && npm run dev
 - [x] 数据导出（CSV）
 - [x] 多图片存储（最多9张）
 - [x] 图片拖拽排序（第一张为主图）
+- [x] AI 商品主图生成器（文生图/图生图/局部重绘）
 
 ### 待开发功能
 - [ ] AB 测试对比
 - [ ] OCR 数据录入
-- [ ] **图片文字替换工具**（新页面）
-  - 上传图片，输入目标文字
-  - AI 识别图片中的文字并替换为用户提供的文字
-  - 用于快速生成商品图片变体
