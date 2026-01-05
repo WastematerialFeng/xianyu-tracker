@@ -715,6 +715,90 @@ async def sync_account_items(account_id: int):
     
     return {"message": "同步功能开发中，请稍后"}
 
+@app.post("/api/crawler/accounts/{account_id}/fetch-items")
+async def fetch_account_items(account_id: int):
+    """从闲鱼爬取账号的商品列表"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM crawler_accounts WHERE id = ?", (account_id,))
+    account = cursor.fetchone()
+    if not account:
+        conn.close()
+        raise HTTPException(status_code=404, detail="账号不存在")
+    
+    account_dict = dict(account)
+    cookies_str = account_dict.get('cookies', '')
+    if not cookies_str:
+        conn.close()
+        return {"success": False, "message": "账号Cookie为空，请重新登录"}
+    
+    try:
+        # 使用爬虫获取商品
+        from crawler.scraper import XianyuCrawler
+        crawler = XianyuCrawler()
+        
+        # 保存Cookie到状态文件
+        from crawler.config import STATE_FILE
+        import json
+        
+        # 解析Cookie字符串为列表格式
+        cookies_list = []
+        for item in cookies_str.split(';'):
+            item = item.strip()
+            if '=' in item:
+                name, value = item.split('=', 1)
+                cookies_list.append({
+                    "name": name.strip(),
+                    "value": value.strip(),
+                    "domain": ".goofish.com",
+                    "path": "/"
+                })
+        
+        state_data = {"cookies": cookies_list}
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(state_data, f, ensure_ascii=False, indent=2)
+        
+        # 执行爬取我的商品
+        items = await crawler.crawl_my_items()
+        
+        # 保存到数据库
+        saved_count = 0
+        for item in items:
+            try:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO crawled_items 
+                    (item_id, title, price, image_url, seller_id, crawled_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    item.get('item_id', ''),
+                    item.get('title', ''),
+                    item.get('price', 0),
+                    item.get('image_url', ''),
+                    str(account_id),
+                    datetime.now().isoformat()
+                ))
+                saved_count += 1
+            except Exception as e:
+                print(f"保存商品失败: {e}")
+        
+        # 更新账号最后同步时间
+        cursor.execute("UPDATE crawler_accounts SET last_sync = ? WHERE id = ?",
+                       (datetime.now().isoformat(), account_id))
+        conn.commit()
+        conn.close()
+        
+        return {
+            "success": True,
+            "total_count": len(items),
+            "saved_count": saved_count,
+            "message": f"成功获取 {len(items)} 个商品，保存 {saved_count} 个"
+        }
+        
+    except Exception as e:
+        conn.close()
+        return {"success": False, "message": f"爬取失败: {str(e)}"}
+
 @app.get("/api/crawler/items")
 def get_crawler_items(account_id: Optional[int] = None):
     """获取爬取的商品"""
