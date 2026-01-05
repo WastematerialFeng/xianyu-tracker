@@ -1,0 +1,34 @@
+{
+  "cookies": [
+    {
+      "name": "cookie2",
+      "value": "1c4e28f102e1a65ac4bd51bac257b859",
+      "domain": ".goofish.com",
+      "path": "/"
+    },
+    {
+      "name": "XSRF-TOKEN",
+      "value": "78121c76-139e-4cbd-a5c6-b2abfe63f8d4",
+      "domain": ".goofish.com",
+      "path": "/"
+    },
+    {
+      "name": "_samesite_flag_",
+      "value": "true",
+      "domain": ".goofish.com",
+      "path": "/"
+    },
+    {
+      "name": "t",
+      "value": "07af10ebf0fb039f359c8db7cccfbfb7",
+      "domain": ".goofish.com",
+      "path": "/"
+    },
+    {
+      "name": "_tb_token_",
+      "value": "fe8f5b7d661e3",
+      "domain": ".goofish.com",
+      "path": "/"
+    }
+  ]
+}

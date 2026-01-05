@@ -68,11 +68,13 @@ def init_db():
     
     # 爬虫任务表
     # 为什么需要：管理多个爬取任务，支持不同关键词和筛选条件
+    # task_type: search=搜索市场商品, my_items=我的商品
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS crawler_tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            keyword TEXT NOT NULL,
+            task_type TEXT DEFAULT 'search',
+            keyword TEXT,
             min_price REAL,
             max_price REAL,
             personal_only INTEGER DEFAULT 0,
@@ -112,6 +114,18 @@ def init_db():
     if 'images' not in columns:
         cursor.execute("ALTER TABLE products ADD COLUMN images TEXT")
         print("已添加 products.images 字段")
+    
+    # 检查 products 表是否有 xianyu_item_id 字段（用于关联闲鱼商品ID）
+    if 'xianyu_item_id' not in columns:
+        cursor.execute("ALTER TABLE products ADD COLUMN xianyu_item_id TEXT")
+        print("已添加 products.xianyu_item_id 字段")
+    
+    # 检查 crawler_tasks 表是否有 task_type 字段
+    cursor.execute("PRAGMA table_info(crawler_tasks)")
+    task_columns = [col[1] for col in cursor.fetchall()]
+    if 'task_type' not in task_columns:
+        cursor.execute("ALTER TABLE crawler_tasks ADD COLUMN task_type TEXT DEFAULT 'search'")
+        print("已添加 crawler_tasks.task_type 字段")
     
     conn.commit()
     conn.close()

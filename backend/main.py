@@ -540,7 +540,8 @@ _crawler_logs: List[str] = []
 class CrawlerTaskCreate(BaseModel):
     """创建爬虫任务的请求体"""
     name: str
-    keyword: str
+    task_type: str = "search"  # search=搜索市场, my_items=我的商品
+    keyword: Optional[str] = None
     min_price: Optional[float] = None
     max_price: Optional[float] = None
     personal_only: bool = False
@@ -561,6 +562,53 @@ class LoginStateData(BaseModel):
     """登录状态数据"""
     cookies: List[dict]
     origins: Optional[List[dict]] = None
+
+
+# 导入扫码登录管理器
+from crawler.qr_login import qr_login_manager
+
+
+# ========== 扫码登录 ==========
+
+@app.post("/api/crawler/qr-login/generate")
+async def generate_qr_login():
+    """生成扫码登录二维码"""
+    result = await qr_login_manager.generate_qr_code()
+    return result
+
+
+@app.get("/api/crawler/qr-login/status/{session_id}")
+def get_qr_login_status(session_id: str):
+    """获取扫码登录状态"""
+    result = qr_login_manager.get_session_status(session_id)
+    
+    # 如果登录成功，自动保存 Cookie 到状态文件
+    if result.get('status') == 'success' and result.get('cookies'):
+        try:
+            # 将 cookie 字符串转换为 Playwright 格式
+            cookie_str = result['cookies']
+            cookies_list = []
+            for item in cookie_str.split('; '):
+                if '=' in item:
+                    name, value = item.split('=', 1)
+                    cookies_list.append({
+                        'name': name,
+                        'value': value,
+                        'domain': '.goofish.com',
+                        'path': '/'
+                    })
+            
+            state_data = {"cookies": cookies_list}
+            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(STATE_FILE, 'w', encoding='utf-8') as f:
+                json.dump(state_data, f, ensure_ascii=False, indent=2)
+            
+            result['saved'] = True
+        except Exception as e:
+            result['saved'] = False
+            result['save_error'] = str(e)
+    
+    return result
 
 
 # ========== 登录状态管理 ==========
@@ -635,12 +683,16 @@ def get_crawler_task(task_id: int):
 @app.post("/api/crawler/tasks")
 def create_crawler_task(task: CrawlerTaskCreate):
     """创建爬虫任务"""
+    # 验证：搜索任务必须有关键词
+    if task.task_type == "search" and not task.keyword:
+        raise HTTPException(status_code=400, detail="搜索任务必须提供关键词")
+    
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        """INSERT INTO crawler_tasks (name, keyword, min_price, max_price, personal_only, max_pages)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (task.name, task.keyword, task.min_price, task.max_price, 
+        """INSERT INTO crawler_tasks (name, task_type, keyword, min_price, max_price, personal_only, max_pages)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (task.name, task.task_type, task.keyword, task.min_price, task.max_price, 
          1 if task.personal_only else 0, task.max_pages)
     )
     conn.commit()
@@ -736,13 +788,87 @@ async def run_crawler_task(task_id: int):
     _crawler_instance = XianyuCrawler(on_progress=log_callback)
     
     try:
-        items = await _crawler_instance.search(
-            keyword=task_dict['keyword'],
-            max_pages=task_dict['max_pages'],
-            min_price=task_dict['min_price'],
-            max_price=task_dict['max_price'],
-            personal_only=bool(task_dict['personal_only'])
-        )
+        # 根据任务类型执行不同的爬取逻辑
+        task_type = task_dict.get('task_type', 'search')
+        
+        if task_type == 'my_items':
+            # 爬取我的商品
+            items = await _crawler_instance.crawl_my_items()
+            
+            # 保存并同步到商品库
+            conn = get_connection()
+            cursor = conn.cursor()
+            saved_count = 0
+            synced_count = 0
+            
+            for item in items:
+                try:
+                    item_id = item.get('item_id')
+                    if not item_id:
+                        continue
+                    
+                    # 保存到 crawled_items
+                    cursor.execute(
+                        """INSERT OR REPLACE INTO crawled_items 
+                           (task_id, item_id, title, price, image_url)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        (task_id, item_id, item.get('title'), item.get('price'), item.get('image_url'))
+                    )
+                    saved_count += 1
+                    
+                    # 同步到 products 表（通过 xianyu_item_id 去重）
+                    cursor.execute("SELECT id FROM products WHERE xianyu_item_id = ?", (item_id,))
+                    existing = cursor.fetchone()
+                    
+                    if existing:
+                        # 更新现有商品
+                        cursor.execute(
+                            """UPDATE products SET title = ?, price = ?, status = ?, image_path = ?
+                               WHERE xianyu_item_id = ?""",
+                            (item.get('title'), item.get('price'), item.get('status', 'active'),
+                             item.get('image_url'), item_id)
+                        )
+                    else:
+                        # 创建新商品
+                        cursor.execute(
+                            """INSERT INTO products (title, price, status, image_path, xianyu_item_id)
+                               VALUES (?, ?, ?, ?, ?)""",
+                            (item.get('title'), item.get('price'), item.get('status', 'active'),
+                             item.get('image_url'), item_id)
+                        )
+                        synced_count += 1
+                    
+                    # 记录今日数据到 daily_stats
+                    product_id = existing[0] if existing else cursor.lastrowid
+                    today = datetime.now().strftime('%Y-%m-%d')
+                    cursor.execute(
+                        """INSERT OR REPLACE INTO daily_stats (product_id, record_date, views, favorites)
+                           VALUES (?, ?, ?, ?)""",
+                        (product_id, today, item.get('views', 0), item.get('wants', 0))
+                    )
+                    
+                except Exception as e:
+                    print(f"保存商品失败: {e}")
+            
+            # 更新任务状态
+            cursor.execute(
+                "UPDATE crawler_tasks SET status = 'idle', last_run = ?, items_count = ? WHERE id = ?",
+                (datetime.now().isoformat(), saved_count, task_id)
+            )
+            conn.commit()
+            conn.close()
+            
+            return {"success": True, "message": f"爬取完成，获取 {saved_count} 个商品，新增 {synced_count} 个到追踪库"}
+        
+        else:
+            # 搜索市场商品（原有逻辑）
+            items = await _crawler_instance.search(
+                keyword=task_dict['keyword'],
+                max_pages=task_dict['max_pages'],
+                min_price=task_dict['min_price'],
+                max_price=task_dict['max_price'],
+                personal_only=bool(task_dict['personal_only'])
+            )
         
         # 保存爬取结果
         conn = get_connection()

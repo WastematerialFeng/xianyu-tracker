@@ -14,6 +14,7 @@ const API_BASE = "http://localhost:8000";
 interface CrawlerTask {
   id: number;
   name: string;
+  task_type: string;  // "search" | "my_items"
   keyword: string;
   min_price: number | null;
   max_price: number | null;
@@ -53,6 +54,7 @@ export default function CrawlerPage() {
   // 新建任务表单
   const [newTask, setNewTask] = useState({
     name: "",
+    task_type: "search" as "search" | "my_items",
     keyword: "",
     min_price: "",
     max_price: "",
@@ -63,6 +65,12 @@ export default function CrawlerPage() {
   
   // Cookie 输入
   const [cookieInput, setCookieInput] = useState("");
+  
+  // 扫码登录状态
+  const [qrCodeUrl, setQrCodeUrl] = useState("");
+  const [qrSessionId, setQrSessionId] = useState("");
+  const [qrStatus, setQrStatus] = useState<"idle" | "loading" | "ready" | "scanned" | "success" | "expired" | "error">("idle");
+  const [loginMethod, setLoginMethod] = useState<"qrcode" | "manual">("qrcode");
 
   // 加载数据
   useEffect(() => {
@@ -78,6 +86,55 @@ export default function CrawlerPage() {
     }
     return () => clearInterval(interval);
   }, [runningTaskId]);
+
+  // 轮询扫码状态
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (qrSessionId && (qrStatus === "ready" || qrStatus === "scanned")) {
+      interval = setInterval(async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/crawler/qr-login/status/${qrSessionId}`);
+          const data = await res.json();
+          if (data.status === "scanned") {
+            setQrStatus("scanned");
+          } else if (data.status === "success") {
+            setQrStatus("success");
+            checkLoginStatus();
+            setTimeout(() => {
+              setQrStatus("idle");
+              setQrCodeUrl("");
+              setQrSessionId("");
+            }, 2000);
+          } else if (data.status === "expired" || data.status === "cancelled") {
+            setQrStatus("expired");
+          }
+        } catch (e) {
+          console.error("检查扫码状态失败:", e);
+        }
+      }, 1500);
+    }
+    return () => clearInterval(interval);
+  }, [qrSessionId, qrStatus]);
+
+  // 生成扫码登录二维码
+  const generateQRCode = async () => {
+    setQrStatus("loading");
+    try {
+      const res = await fetch(`${API_BASE}/api/crawler/qr-login/generate`, { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        setQrCodeUrl(data.qr_code_url);
+        setQrSessionId(data.session_id);
+        setQrStatus("ready");
+      } else {
+        setQrStatus("error");
+        alert(data.message || "生成二维码失败");
+      }
+    } catch (e) {
+      setQrStatus("error");
+      console.error("生成二维码失败:", e);
+    }
+  };
 
   const loadTasks = async () => {
     try {
@@ -124,8 +181,12 @@ export default function CrawlerPage() {
 
   // 创建任务
   const handleCreateTask = async () => {
-    if (!newTask.name || !newTask.keyword) {
-      alert("请填写任务名称和关键词");
+    if (!newTask.name) {
+      alert("请填写任务名称");
+      return;
+    }
+    if (newTask.task_type === "search" && !newTask.keyword) {
+      alert("搜索任务请填写关键词");
       return;
     }
     
@@ -134,15 +195,19 @@ export default function CrawlerPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...newTask,
+          name: newTask.name,
+          task_type: newTask.task_type,
+          keyword: newTask.keyword || null,
           min_price: newTask.min_price ? parseFloat(newTask.min_price) : null,
           max_price: newTask.max_price ? parseFloat(newTask.max_price) : null,
+          personal_only: newTask.personal_only,
+          max_pages: newTask.max_pages,
         }),
       });
       
       if (res.ok) {
         setShowNewTaskForm(false);
-        setNewTask({ name: "", keyword: "", min_price: "", max_price: "", personal_only: false, max_pages: 1 });
+        setNewTask({ name: "", task_type: "search", keyword: "", min_price: "", max_price: "", personal_only: false, max_pages: 1 });
         loadTasks();
       }
     } catch (e) {
@@ -308,6 +373,31 @@ export default function CrawlerPage() {
             {showNewTaskForm && (
               <div className="mb-6 p-4 bg-gray-50 rounded-lg">
                 <h3 className="font-medium text-gray-900 mb-3">新建爬虫任务</h3>
+                
+                {/* 任务类型选择 */}
+                <div className="flex gap-4 mb-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="task_type"
+                      checked={newTask.task_type === "search"}
+                      onChange={() => setNewTask({ ...newTask, task_type: "search" })}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span className="text-gray-900">搜索市场商品</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="task_type"
+                      checked={newTask.task_type === "my_items"}
+                      onChange={() => setNewTask({ ...newTask, task_type: "my_items", name: newTask.name || "我的商品同步" })}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span className="text-gray-900">我的商品（同步到追踪库）</span>
+                  </label>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <input
                     type="text"
@@ -316,27 +406,33 @@ export default function CrawlerPage() {
                     onChange={(e) => setNewTask({ ...newTask, name: e.target.value })}
                     className="px-3 py-2 border rounded-lg text-gray-900"
                   />
-                  <input
-                    type="text"
-                    placeholder="搜索关键词"
-                    value={newTask.keyword}
-                    onChange={(e) => setNewTask({ ...newTask, keyword: e.target.value })}
-                    className="px-3 py-2 border rounded-lg text-gray-900"
-                  />
-                  <input
-                    type="number"
-                    placeholder="最低价格"
-                    value={newTask.min_price}
-                    onChange={(e) => setNewTask({ ...newTask, min_price: e.target.value })}
-                    className="px-3 py-2 border rounded-lg text-gray-900"
-                  />
-                  <input
-                    type="number"
-                    placeholder="最高价格"
-                    value={newTask.max_price}
-                    onChange={(e) => setNewTask({ ...newTask, max_price: e.target.value })}
-                    className="px-3 py-2 border rounded-lg text-gray-900"
-                  />
+                  {newTask.task_type === "search" && (
+                    <input
+                      type="text"
+                      placeholder="搜索关键词"
+                      value={newTask.keyword}
+                      onChange={(e) => setNewTask({ ...newTask, keyword: e.target.value })}
+                      className="px-3 py-2 border rounded-lg text-gray-900"
+                    />
+                  )}
+                  {newTask.task_type === "search" && (
+                    <>
+                      <input
+                        type="number"
+                        placeholder="最低价格"
+                        value={newTask.min_price}
+                        onChange={(e) => setNewTask({ ...newTask, min_price: e.target.value })}
+                        className="px-3 py-2 border rounded-lg text-gray-900"
+                      />
+                      <input
+                        type="number"
+                        placeholder="最高价格"
+                        value={newTask.max_price}
+                        onChange={(e) => setNewTask({ ...newTask, max_price: e.target.value })}
+                        className="px-3 py-2 border rounded-lg text-gray-900"
+                      />
+                    </>
+                  )}
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -380,6 +476,11 @@ export default function CrawlerPage() {
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-gray-900">{task.name}</span>
                         <span className={`px-2 py-0.5 text-xs rounded ${
+                          task.task_type === "my_items" ? "bg-purple-100 text-purple-800" : "bg-cyan-100 text-cyan-800"
+                        }`}>
+                          {task.task_type === "my_items" ? "我的商品" : "搜索市场"}
+                        </span>
+                        <span className={`px-2 py-0.5 text-xs rounded ${
                           task.status === "running" ? "bg-blue-100 text-blue-800" :
                           task.status === "error" ? "bg-red-100 text-red-800" :
                           "bg-gray-100 text-gray-600"
@@ -388,9 +489,15 @@ export default function CrawlerPage() {
                         </span>
                       </div>
                       <p className="text-sm text-gray-600 mt-1">
-                        关键词: {task.keyword} | 
-                        价格: {task.min_price || 0} - {task.max_price || "不限"} |
-                        已爬取: {task.items_count} 个
+                        {task.task_type === "my_items" ? (
+                          <>已同步: {task.items_count} 个商品</>
+                        ) : (
+                          <>
+                            关键词: {task.keyword} | 
+                            价格: {task.min_price || 0} - {task.max_price || "不限"} |
+                            已爬取: {task.items_count} 个
+                          </>
+                        )}
                       </p>
                       {task.last_run && (
                         <p className="text-xs text-gray-400 mt-1">上次运行: {new Date(task.last_run).toLocaleString()}</p>
@@ -509,35 +616,128 @@ export default function CrawlerPage() {
               </p>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <h3 className="font-medium text-gray-900 mb-2">获取登录状态</h3>
-                <ol className="text-sm text-gray-600 space-y-2 list-decimal list-inside">
-                  <li>安装 Chrome 扩展: <a href="https://chromewebstore.google.com/detail/xianyu-login-state-extrac/eidlpfjiodpigmfcahkmlenhppfklcoa" target="_blank" className="text-blue-600 hover:underline">闲鱼登录状态提取</a></li>
-                  <li>在 Chrome 中打开并登录 <a href="https://www.goofish.com" target="_blank" className="text-blue-600 hover:underline">闲鱼网页版</a></li>
-                  <li>点击扩展图标，点击"提取登录状态"</li>
-                  <li>点击"复制到剪贴板"</li>
-                  <li>将内容粘贴到下方输入框</li>
-                </ol>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">粘贴 Cookie 数据 (JSON 格式)</label>
-                <textarea
-                  value={cookieInput}
-                  onChange={(e) => setCookieInput(e.target.value)}
-                  placeholder='{"cookies": [...], "origins": [...]}'
-                  className="w-full h-40 px-3 py-2 border rounded-lg font-mono text-sm text-gray-900"
-                />
-              </div>
-
+            {/* 登录方式切换 */}
+            <div className="flex gap-4 mb-6">
               <button
-                onClick={handleSaveLoginState}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                onClick={() => setLoginMethod("qrcode")}
+                className={`px-4 py-2 rounded-lg font-medium ${
+                  loginMethod === "qrcode" 
+                    ? "bg-blue-600 text-white" 
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
               >
-                保存登录状态
+                扫码登录（推荐）
+              </button>
+              <button
+                onClick={() => setLoginMethod("manual")}
+                className={`px-4 py-2 rounded-lg font-medium ${
+                  loginMethod === "manual" 
+                    ? "bg-blue-600 text-white" 
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
+              >
+                手动输入 Cookie
               </button>
             </div>
+
+            {/* 扫码登录 */}
+            {loginMethod === "qrcode" && (
+              <div className="space-y-4">
+                <div className="text-center">
+                  {qrStatus === "idle" && (
+                    <button
+                      onClick={generateQRCode}
+                      className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                    >
+                      生成登录二维码
+                    </button>
+                  )}
+                  
+                  {qrStatus === "loading" && (
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                      <p className="text-gray-600">正在生成二维码...</p>
+                    </div>
+                  )}
+                  
+                  {(qrStatus === "ready" || qrStatus === "scanned") && qrCodeUrl && (
+                    <div className="flex flex-col items-center gap-4">
+                      <img src={qrCodeUrl} alt="登录二维码" className="w-48 h-48 border rounded-lg" />
+                      <p className={qrStatus === "scanned" ? "text-blue-600 font-medium" : "text-gray-600"}>
+                        {qrStatus === "scanned" ? "已扫描，请在手机上确认登录" : "请使用闲鱼 APP 扫描二维码"}
+                      </p>
+                      <p className="text-sm text-gray-500">二维码有效期约 5 分钟</p>
+                    </div>
+                  )}
+                  
+                  {qrStatus === "success" && (
+                    <div className="flex flex-col items-center gap-3 text-green-600">
+                      <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <p className="font-medium text-lg">登录成功！</p>
+                    </div>
+                  )}
+                  
+                  {qrStatus === "expired" && (
+                    <div className="flex flex-col items-center gap-3">
+                      <p className="text-gray-600">二维码已过期</p>
+                      <button
+                        onClick={generateQRCode}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                      >
+                        重新生成
+                      </button>
+                    </div>
+                  )}
+                  
+                  {qrStatus === "error" && (
+                    <div className="flex flex-col items-center gap-3">
+                      <p className="text-red-600">生成二维码失败</p>
+                      <button
+                        onClick={generateQRCode}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                      >
+                        重试
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 手动输入 Cookie */}
+            {loginMethod === "manual" && (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="font-medium text-gray-900 mb-2">获取登录状态</h3>
+                  <ol className="text-sm text-gray-600 space-y-2 list-decimal list-inside">
+                    <li>安装 Chrome 扩展: <a href="https://chromewebstore.google.com/detail/xianyu-login-state-extrac/eidlpfjiodpigmfcahkmlenhppfklcoa" target="_blank" className="text-blue-600 hover:underline">闲鱼登录状态提取</a></li>
+                    <li>在 Chrome 中打开并登录 <a href="https://www.goofish.com" target="_blank" className="text-blue-600 hover:underline">闲鱼网页版</a></li>
+                    <li>点击扩展图标，点击"提取登录状态"</li>
+                    <li>点击"复制到剪贴板"</li>
+                    <li>将内容粘贴到下方输入框</li>
+                  </ol>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">粘贴 Cookie 数据 (JSON 格式)</label>
+                  <textarea
+                    value={cookieInput}
+                    onChange={(e) => setCookieInput(e.target.value)}
+                    placeholder='{"cookies": [...], "origins": [...]}'
+                    className="w-full h-40 px-3 py-2 border rounded-lg font-mono text-sm text-gray-900"
+                  />
+                </div>
+
+                <button
+                  onClick={handleSaveLoginState}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  保存登录状态
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

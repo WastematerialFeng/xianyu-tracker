@@ -28,6 +28,7 @@ export interface ProductCreate {
   image_original?: number;
   image_path?: string;
   images?: string[];  // 多图片路径数组
+  status?: string;  // 商品状态
   account_id?: number;
 }
 

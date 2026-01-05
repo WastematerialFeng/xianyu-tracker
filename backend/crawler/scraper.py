@@ -350,3 +350,179 @@ class XianyuCrawler:
             
         except PlaywrightTimeoutError:
             return None
+
+    async def crawl_my_items(self) -> List[Dict[str, Any]]:
+        """
+        爬取我的商品列表
+        
+        访问闲鱼"我的发布"页面，获取当前登录账号发布的所有商品
+        
+        Returns:
+            商品列表，包含：item_id, title, price, status, views, wants, image_url 等
+        """
+        if self.is_running:
+            await self._report("爬虫正在运行中，请等待完成")
+            return []
+        
+        self.is_running = True
+        self.should_stop = False
+        all_items = []
+        
+        try:
+            # 检查登录状态
+            if not await self.check_login_state():
+                await self._report("请先登录闲鱼账号")
+                return []
+            
+            # 初始化浏览器
+            if not await self._init_browser():
+                return []
+            
+            page = await self.context.new_page()
+            
+            # 步骤 0: 先访问首页
+            await self._report("步骤 0: 访问首页...")
+            await page.goto("https://www.goofish.com/", wait_until="domcontentloaded", timeout=30000)
+            await random_sleep(*DELAY_CONFIG["page_load"])
+            
+            # 步骤 1: 访问个人主页
+            await self._report("步骤 1: 访问我的发布页面...")
+            await page.goto("https://www.goofish.com/personal?tabKey=sell", wait_until="domcontentloaded", timeout=30000)
+            await random_sleep(*DELAY_CONFIG["page_load"])
+            
+            # 检查是否需要登录
+            if "login" in page.url.lower():
+                await self._report("未登录或登录已过期，请重新登录")
+                return []
+            
+            # 步骤 2: 等待商品列表加载
+            await self._report("步骤 2: 等待商品列表加载...")
+            try:
+                await page.wait_for_selector('[class*="item-card"]', timeout=15000)
+            except PlaywrightTimeoutError:
+                await self._report("未找到商品列表，可能没有发布商品")
+                return []
+            
+            await random_sleep(2, 3)
+            
+            # 步骤 3: 解析商品列表
+            await self._report("步骤 3: 解析商品列表...")
+            items = await self._parse_my_items(page)
+            all_items.extend(items)
+            
+            # 步骤 4: 滚动加载更多
+            await self._report("步骤 4: 滚动加载更多商品...")
+            prev_count = len(all_items)
+            max_scroll = 10  # 最多滚动10次
+            
+            for i in range(max_scroll):
+                if self.should_stop:
+                    break
+                
+                # 滚动到底部
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await random_sleep(2, 3)
+                
+                # 解析新加载的商品
+                items = await self._parse_my_items(page)
+                
+                # 去重
+                existing_ids = {item['item_id'] for item in all_items}
+                new_items = [item for item in items if item['item_id'] not in existing_ids]
+                
+                if not new_items:
+                    await self._report("没有更多商品了")
+                    break
+                
+                all_items.extend(new_items)
+                await self._report(f"已加载 {len(all_items)} 个商品...")
+            
+            await self._report(f"爬取完成，共获取 {len(all_items)} 个商品")
+            
+        except PlaywrightTimeoutError as e:
+            await self._report(f"操作超时: {e}")
+        except Exception as e:
+            await self._report(f"爬取出错: {e}")
+        finally:
+            await self._close_browser()
+            self.is_running = False
+        
+        return all_items
+
+    async def _parse_my_items(self, page: Page) -> List[Dict[str, Any]]:
+        """解析我的商品列表页面"""
+        items = []
+        
+        try:
+            # 获取所有商品卡片
+            cards = await page.query_selector_all('[class*="item-card"]')
+            
+            for card in cards:
+                try:
+                    item = {}
+                    
+                    # 获取商品链接和ID
+                    link = await card.query_selector('a[href*="/item"]')
+                    if link:
+                        href = await link.get_attribute('href')
+                        if href and 'id=' in href:
+                            item['item_id'] = href.split('id=')[-1].split('&')[0]
+                    
+                    if not item.get('item_id'):
+                        continue
+                    
+                    # 获取标题
+                    title_el = await card.query_selector('[class*="title"]')
+                    if title_el:
+                        item['title'] = await title_el.inner_text()
+                    
+                    # 获取价格
+                    price_el = await card.query_selector('[class*="price"]')
+                    if price_el:
+                        price_text = await price_el.inner_text()
+                        price_text = price_text.replace('¥', '').replace(',', '').strip()
+                        try:
+                            item['price'] = float(price_text)
+                        except:
+                            item['price'] = 0
+                    
+                    # 获取图片
+                    img_el = await card.query_selector('img')
+                    if img_el:
+                        item['image_url'] = await img_el.get_attribute('src')
+                    
+                    # 获取状态（在售/已售/下架）
+                    status_el = await card.query_selector('[class*="status"]')
+                    if status_el:
+                        status_text = await status_el.inner_text()
+                        if '已售' in status_text:
+                            item['status'] = 'sold'
+                        elif '下架' in status_text:
+                            item['status'] = 'inactive'
+                        else:
+                            item['status'] = 'active'
+                    else:
+                        item['status'] = 'active'
+                    
+                    # 获取浏览量/想要数（如果页面显示）
+                    stats_el = await card.query_selector('[class*="stats"], [class*="info"]')
+                    if stats_el:
+                        stats_text = await stats_el.inner_text()
+                        # 尝试解析 "123浏览" "45想要" 格式
+                        import re
+                        views_match = re.search(r'(\d+)\s*浏览', stats_text)
+                        wants_match = re.search(r'(\d+)\s*想要', stats_text)
+                        if views_match:
+                            item['views'] = int(views_match.group(1))
+                        if wants_match:
+                            item['wants'] = int(wants_match.group(1))
+                    
+                    items.append(item)
+                    
+                except Exception as e:
+                    continue
+            
+        except Exception as e:
+            await self._report(f"解析商品列表出错: {e}")
+        
+        return items
