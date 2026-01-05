@@ -256,7 +256,7 @@ export default function ImageGenerator() {
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="描述你想要生成的图片，例如：一个白色背景的简约风格手机壳产品图，光线柔和，高清细节"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none text-gray-900 placeholder-gray-500"
               rows={3}
             />
           </div>
@@ -273,7 +273,7 @@ export default function ImageGenerator() {
                     className={`flex-1 py-2 rounded-lg border-2 font-medium transition-all ${
                       count === n
                         ? "border-purple-500 bg-purple-50 text-purple-700"
-                        : "border-gray-200 hover:border-purple-300"
+                        : "border-gray-200 hover:border-purple-300 text-gray-700"
                     }`}
                   >
                     {n}
@@ -286,7 +286,7 @@ export default function ImageGenerator() {
               <select
                 value={size}
                 onChange={(e) => setSize(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900"
               >
                 {SIZES.map((s) => (
                   <option key={s} value={s}>{s}</option>
