@@ -197,7 +197,7 @@ export default function CrawlerPage() {
         body: JSON.stringify({
           name: newTask.name,
           task_type: newTask.task_type,
-          keyword: newTask.keyword || null,
+          keyword: newTask.keyword && newTask.keyword.trim() !== "" ? newTask.keyword : null,
           min_price: newTask.min_price ? parseFloat(newTask.min_price) : null,
           max_price: newTask.max_price ? parseFloat(newTask.max_price) : null,
           personal_only: newTask.personal_only,
