@@ -13,8 +13,10 @@ DB_PATH = Path(__file__).parent.parent / "data" / "xianyu.db"
 def get_connection():
     """获取数据库连接"""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)  # 增加超时时间
     conn.row_factory = sqlite3.Row  # 返回字典格式
+    # 启用 WAL 模式，减少锁定问题
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 

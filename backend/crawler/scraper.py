@@ -136,11 +136,19 @@ class XianyuCrawler:
                 "color_scheme": 'light'
             }
             
-            # 如果有登录状态文件，加载它
-            if STATE_FILE.exists():
-                context_options["storage_state"] = str(STATE_FILE)
-            
             self.context = await self.browser.new_context(**context_options)
+            
+            # 手动加载 Cookie（兼容我们的格式）
+            if STATE_FILE.exists():
+                try:
+                    with open(STATE_FILE, 'r', encoding='utf-8') as f:
+                        state = json.load(f)
+                    cookies = state.get('cookies', [])
+                    if cookies:
+                        await self.context.add_cookies(cookies)
+                        await self._report(f"已加载 {len(cookies)} 个 Cookie")
+                except Exception as e:
+                    await self._report(f"加载 Cookie 失败: {e}")
             
             # 注入反检测脚本
             await self.context.add_init_script(ANTI_DETECT_SCRIPT)
