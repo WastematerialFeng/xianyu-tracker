@@ -2,13 +2,13 @@
   "cookies": [
     {
       "name": "cookie2",
-      "value": "1c4e28f102e1a65ac4bd51bac257b859",
+      "value": "19ff69b68dab0e47a8a7fd3980efd7e5",
       "domain": ".goofish.com",
       "path": "/"
     },
     {
       "name": "XSRF-TOKEN",
-      "value": "78121c76-139e-4cbd-a5c6-b2abfe63f8d4",
+      "value": "e6a2882a-5b40-4242-8024-eb9e552654c7",
       "domain": ".goofish.com",
       "path": "/"
     },
@@ -20,13 +20,13 @@
     },
     {
       "name": "t",
-      "value": "07af10ebf0fb039f359c8db7cccfbfb7",
+      "value": "597c29d32bb47f10215cfc5fff97e5de",
       "domain": ".goofish.com",
       "path": "/"
     },
     {
       "name": "_tb_token_",
-      "value": "fe8f5b7d661e3",
+      "value": "79fbe79a3b8e9",
       "domain": ".goofish.com",
       "path": "/"
     }

@@ -88,6 +88,20 @@ def init_db():
         )
     """)
     
+    # 爬虫账号表
+    # 为什么需要：支持多账号管理，每个账号有独立的Cookie
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS crawler_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            xianyu_id TEXT,
+            cookies TEXT,
+            status TEXT DEFAULT 'active',
+            last_sync DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
     # 爬取的商品数据表
     # 为什么需要：存储从闲鱼爬取的原始商品数据，与手动录入的商品分开管理
     cursor.execute("""

@@ -654,6 +654,80 @@ def save_login_state(data: LoginStateData):
         raise HTTPException(status_code=500, detail=f"保存失败: {str(e)}")
 
 
+# ========== 爬虫账号管理 ==========
+
+class CrawlerAccountCreate(BaseModel):
+    """创建爬虫账号"""
+    name: str
+    xianyu_id: Optional[str] = None
+    cookies: str
+
+@app.get("/api/crawler/accounts")
+def get_crawler_accounts():
+    """获取所有爬虫账号"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name, xianyu_id, status, last_sync, created_at FROM crawler_accounts ORDER BY created_at DESC")
+    accounts = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return {"data": accounts}
+
+@app.post("/api/crawler/accounts")
+def create_crawler_account(account: CrawlerAccountCreate):
+    """创建爬虫账号"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO crawler_accounts (name, xianyu_id, cookies) VALUES (?, ?, ?)",
+        (account.name, account.xianyu_id, account.cookies)
+    )
+    conn.commit()
+    account_id = cursor.lastrowid
+    conn.close()
+    return {"message": "创建成功", "id": account_id}
+
+@app.delete("/api/crawler/accounts/{account_id}")
+def delete_crawler_account(account_id: int):
+    """删除爬虫账号"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM crawler_accounts WHERE id = ?", (account_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "删除成功"}
+
+@app.post("/api/crawler/accounts/{account_id}/sync")
+async def sync_account_items(account_id: int):
+    """同步账号商品"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM crawler_accounts WHERE id = ?", (account_id,))
+    account = cursor.fetchone()
+    if not account:
+        conn.close()
+        raise HTTPException(status_code=404, detail="账号不存在")
+    
+    # 更新最后同步时间
+    cursor.execute("UPDATE crawler_accounts SET last_sync = ? WHERE id = ?", 
+                   (datetime.now().isoformat(), account_id))
+    conn.commit()
+    conn.close()
+    
+    return {"message": "同步功能开发中，请稍后"}
+
+@app.get("/api/crawler/items")
+def get_crawler_items(account_id: Optional[int] = None):
+    """获取爬取的商品"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    if account_id:
+        cursor.execute("SELECT * FROM crawled_items WHERE task_id IN (SELECT id FROM crawler_tasks) ORDER BY crawled_at DESC LIMIT 100")
+    else:
+        cursor.execute("SELECT * FROM crawled_items ORDER BY crawled_at DESC LIMIT 100")
+    items = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return {"data": items}
+
 # ========== 爬虫任务管理 ==========
 
 @app.get("/api/crawler/tasks")
